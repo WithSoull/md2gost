@@ -4,7 +4,7 @@ class Md2gost < Formula
   desc "Markdown to DOCX converter following GOST 7.32"
   homepage "https://github.com/WithSoull/md2gost"
   url "https://github.com/WithSoull/md2gost/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 ""
+  sha256 "04c0063d1848f4da0df20fd09fb2c0f134ca79ae91848da8d85d38d429d43d42"
   license "MIT"
 
   depends_on "pandoc"
