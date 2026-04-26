@@ -15,9 +15,7 @@ brew install md2gost
 
 ### Ручная установка
 
-Если не используешь Homebrew:
-
-1. Поставь зависимости:
+1. Поставь pandoc и pandoc-crossref:
 
 ```bash
 # macOS
@@ -26,6 +24,10 @@ brew install pandoc pandoc-crossref
 # Ubuntu/Debian
 sudo apt install pandoc
 # pandoc-crossref: скачай бинарник с https://github.com/lierdakil/pandoc-crossref/releases
+
+# Windows
+choco install pandoc
+# pandoc-crossref: скачай .exe с https://github.com/lierdakil/pandoc-crossref/releases и положи в PATH
 ```
 
 2. Установи md2gost:
@@ -33,9 +35,27 @@ sudo apt install pandoc
 ```bash
 git clone https://github.com/WithSoull/md2gost.git
 cd md2gost
+```
+
+**С uv (быстрее всего):**
+
+```bash
+uv venv && uv pip install -e .
+source .venv/bin/activate
+```
+
+**С pip:**
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
 source .venv/bin/activate
+```
+
+**С pipx (глобально, без venv):**
+
+```bash
+pipx install .
 ```
 
 ## Использование
