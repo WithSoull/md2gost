@@ -26,6 +26,7 @@ def validate(input_path: str | Path) -> list[ValidationWarning]:
     warnings += _check_heading_levels(lines)
     warnings += _check_image_paths(lines, input_path.parent)
     warnings += _check_crossref_syntax(lines)
+    warnings += _check_reference_words(text)
     return warnings
 
 
@@ -122,6 +123,35 @@ def _check_crossref_syntax(lines: list[str]) -> list[ValidationWarning]:
                     message=f"Ссылка @{kind}:{name} не имеет определения {{#{kind}:{name}}}",
                 ))
 
+    return warnings
+
+
+_REFERENCE_WORDS = {"fig": ("Рисун", "Рисунок"), "tbl": ("Табли", "Таблица")}
+_CONNECTORS = {"и", "или", "а", "также"}
+
+
+def _check_reference_words(text: str) -> list[ValidationWarning]:
+    """@fig:/@tbl: render as a bare number, so the noun must precede them."""
+    warnings: list[ValidationWarning] = []
+    ref_re = re.compile(r"@(fig|tbl|eq):([\w.-]*[\w-])")
+    for m in ref_re.finditer(text):
+        kind, name = m.groups()
+        if kind == "eq":
+            continue
+        # Look within the paragraph only. Grouped references share one noun:
+        # «Таблицы @tbl:a и @tbl:b», «Рисунки [@fig:a; @fig:b]».
+        before = text[max(0, m.start() - 200):m.start()].rsplit("\n\n", 1)[-1]
+        before = ref_re.sub(" ", before)
+        words = re.findall(r"[^\W\d_]+", before)
+        while words and words[-1].lower() in _CONNECTORS:
+            words.pop()
+        prefix, noun = _REFERENCE_WORDS[kind]
+        if not words or not words[-1].startswith(prefix):
+            warnings.append(ValidationWarning(
+                line=text.count("\n", 0, m.start()) + 1,
+                message=f"Перед @{kind}:{name} нет слова «{noun}» в нужном падеже: "
+                        f"ссылка выводится только номером",
+            ))
     return warnings
 
 

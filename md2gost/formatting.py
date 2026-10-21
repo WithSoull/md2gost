@@ -16,6 +16,17 @@ W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 M = 'http://schemas.openxmlformats.org/officeDocument/2006/math'
 NS = {'w': W, 'm': M}
 
+# One free line of body text (14 pt, 1.5 spacing) above and below a formula,
+# ГОСТ 7.32-2017, 6.8.1. Spacing, not empty paragraphs.
+EQUATION_SPACING = 480
+# Cell padding: about 1 mm above and below; Word's default 0.19 cm at the sides.
+CELL_MARGIN_Y = 57
+CELL_MARGIN_X = 108
+# Schema order of w:tblPr children: strict OOXML readers expect it.
+TBLPR_ORDER = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual', 'tblStyleRowBandSize',
+               'tblStyleColBandSize', 'tblW', 'jc', 'tblCellSpacing', 'tblInd', 'tblBorders',
+               'shd', 'tblLayout', 'tblCellMar', 'tblLook', 'tblCaption', 'tblDescription']
+
 
 def tag(name: str) -> str:
     return f'{{{W}}}{name}'
@@ -135,6 +146,8 @@ def configure_styles(root: ET.Element) -> dict[str, str]:
               align='left', before=120, after=120, keep=True)
     configure('Image Caption', size=24, bold=True, line=240, first=0,
               align='center', after=120)
+    # Lines of the «где» explanation after a formula (gost-tables.lua).
+    configure('Where', line=360, first=0, align='both', before=0, after=0)
     configure('Figure', line=240, first=0, align='center', keep=True)
     configure('Captioned Figure', line=240, first=0, align='center', keep=True)
     configure('Listing Caption', 'GOSTListingCaption', size=24, italic=True,
@@ -214,7 +227,8 @@ def fix_equations(root: ET.Element) -> None:
         p.remove(wrap)
         p.insert(index, math)
         ppr = properties(p, 'pPr')
-        paragraph(ppr, first=0, align='left', before=120, after=120, keep=True)
+        paragraph(ppr, first=0, align='left', before=EQUATION_SPACING,
+                  after=EQUATION_SPACING, keep=True)
         remove(ppr, 'tabs')
         tabs = child(ppr, 'tabs')
         width = widths.get(p, 9638)
@@ -226,6 +240,108 @@ def fix_equations(root: ET.Element) -> None:
         number = ET.SubElement(p, tag('r'))
         font(child(number, 'rPr'))
         child(number, 't').text = f'({number_text})'
+
+
+# Times New Roman advance widths in em, checked against the font metrics:
+# the estimate stays within -7%..+15% of the real width of Russian words.
+_WIDE_CHARS = set('жмшщыюфЖМШЩЫЮФmwMW')
+_NARROW_CHARS = set('ilrtjfгI.,:;!|\'()[]')
+
+
+def text_width(text: str, bold: bool = False) -> float:
+    """Estimated width of 12 pt table text in twips."""
+    em = 0.0
+    for ch in text:
+        if ch.isspace():
+            em += 0.25
+        elif ch in _WIDE_CHARS:
+            em += 0.95 if ch.isupper() else 0.72
+        elif ch in _NARROW_CHARS:
+            em += 0.3
+        elif ch.isupper():
+            em += 0.7
+        elif ch.isalnum():
+            em += 0.5
+        else:
+            em += 0.4
+    return em * 240 * (1.08 if bold else 1.0)
+
+
+def cell_lines(cell: ET.Element) -> list[str]:
+    """Visible text of a cell, one string per line, including math (m:t)."""
+    lines = []
+    for p in cell.iter(tag('p')):
+        parts = []
+        for item in p:
+            if item.tag == tag('pPr'):
+                continue
+            for el in item.iter():
+                if el.tag in (tag('t'), f'{{{M}}}t'):
+                    parts.append(el.text or '')
+                elif el.tag == tag('tab'):
+                    parts.append(' ')
+                elif el.tag in (tag('br'), tag('cr')):
+                    parts.append('\n')
+        lines.extend(''.join(parts).split('\n'))
+    return lines
+
+
+def fit_columns(table: ET.Element, width: int) -> None:
+    """Size columns by content when Markdown left them equal.
+
+    A column gets at least its longest word (bold in the header row) and at
+    most its longest line; the columns together take the full text width.
+    """
+    grid = table.find('w:tblGrid', NS)
+    cols = grid.findall('w:gridCol', NS) if grid is not None else []
+    if not cols or len({c.get(tag('w')) for c in cols}) != 1:
+        return
+    n = len(cols)
+    low, high = [0.0] * n, [0.0] * n
+    rows = table.findall('w:tr', NS)
+    for r, row in enumerate(rows):
+        index = 0
+        for cell in row.findall('w:tc', NS):
+            span = cell.find('w:tcPr/w:gridSpan', NS)
+            span = int(span.get(tag('val'), '1')) if span is not None else 1
+            # Spanning cells do not decide the width of a single column.
+            if span == 1 and index < n:
+                for line in cell_lines(cell):
+                    # A 10% margin absorbs the error of the width estimate.
+                    word = max((text_width(w, r == 0) for w in line.split()), default=0.0)
+                    low[index] = max(low[index], word * 1.1)
+                    high[index] = max(high[index], text_width(line.strip(), r == 0))
+            index += span
+    pad = 2 * CELL_MARGIN_X
+    low = [x + pad for x in low]
+    high = [max(h + pad, l) for h, l in zip(high, low)]
+    if sum(high) <= width:
+        sizes = [h * width / sum(high) for h in high]
+    elif sum(low) >= width:
+        sizes = [l * width / sum(low) for l in low]
+    else:
+        # Auto table layout: interpolate between the narrowest and widest fit.
+        share = (width - sum(low)) / (sum(high) - sum(low))
+        sizes = [l + (h - l) * share for l, h in zip(low, high)]
+    sizes = [int(s) for s in sizes]
+    sizes[sizes.index(max(sizes))] += width - sum(sizes)
+    for col, size in zip(cols, sizes):
+        col.set(tag('w'), str(size))
+    for row in rows:
+        index = 0
+        for cell in row.findall('w:tc', NS):
+            tcpr = properties(cell, 'tcPr')
+            span = tcpr.find('w:gridSpan', NS)
+            span = int(span.get(tag('val'), '1')) if span is not None else 1
+            remove(tcpr, 'tcW')
+            tcw = ET.Element(tag('tcW'), {tag('w'): str(sum(sizes[index:index + span])),
+                                          tag('type'): 'dxa'})
+            # tcW follows only cnfStyle in the schema order of w:tcPr.
+            tcpr.insert(1 if tcpr.find('w:cnfStyle', NS) is not None else 0, tcw)
+            index += span
+    tpr = properties(table, 'tblPr')
+    child(tpr, 'tblW', w=width, type='dxa')
+    child(tpr, 'tblLayout', type='autofit')
 
 
 def populate_toc(body: ET.Element, toc: ET.Element, styles: dict[str, str]) -> None:
@@ -361,6 +477,7 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
         if i == 0:
             child(sect, 'pgNumType', start=page_start)
     parents = {el: parent for parent in body.iter() for el in parent}
+    text_widths = section_widths(root)
     for table in list(body.iter(tag('tbl'))):
         if any(p.find('w:pPr/w:pStyle', NS) is not None and
                p.find('w:pPr/w:pStyle', NS).get(tag('val')) == 'SourceCode'
@@ -380,7 +497,8 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
             ppr = properties(p, 'pPr')
             child(ppr, 'spacing', before=0, after=0, line=240, lineRule='auto')
             child(ppr, 'ind', firstLine=0, left=0, right=0)
-            child(ppr, 'jc', val='both')
+            # Justified text in narrow content-fitted columns stretches spaces.
+            child(ppr, 'jc', val='left')
             child(ppr, 'keepNext', val='0')
             child(ppr, 'pageBreakBefore', val='0')
             for run in p.iter(tag('r')):
@@ -391,6 +509,16 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
                 child(properties(p, 'pPr'), 'jc', val='center')
             for run in header.iter(tag('r')):
                 child(properties(run, 'rPr'), 'b', val='1')
+        margins = child(tpr, 'tblCellMar')
+        for edge, size in [('top', CELL_MARGIN_Y), ('left', CELL_MARGIN_X),
+                           ('bottom', CELL_MARGIN_Y), ('right', CELL_MARGIN_X)]:
+            child(margins, edge, w=size, type='dxa')
+        if parents[table].tag != tag('tc'):
+            first = table.find('.//w:p', NS)
+            fit_columns(table, text_widths.get(first, 9638))
+        names = [el.tag.split('}')[1] for el in tpr]
+        rank = {n: TBLPR_ORDER.index(n) if n in TBLPR_ORDER else len(TBLPR_ORDER) for n in names}
+        tpr[:] = sorted(tpr, key=lambda el: rank[el.tag.split('}')[1]])
         # Word has no table-level paragraph spacing. Put the gap on the next
         # paragraph, retaining a heading's larger spacing. Adjacent tables and
         # a table at the end need their own six-point spacer instead.

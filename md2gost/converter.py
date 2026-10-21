@@ -54,7 +54,6 @@ def build_command(
         "--lua-filter", str(APPENDIX_LISTING_FILTER),
         "--filter", "pandoc-crossref",
         "-M", "figureTitle=Рисунок",
-        "-M", "figPrefix=рис.",
         "-M", "titleDelim= – ",
         "-o", str(output_path),
     ]

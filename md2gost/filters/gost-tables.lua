@@ -7,7 +7,45 @@ local function caption_with_prefix(caption, prefix)
   caption.long[1] = pandoc.Plain(content)
 end
 
+-- Pandoc parses $$...$$ {#eq:id} as Math + Space + Str, not a Span.
+local function equation_label(el)
+  if el.t == 'Para' and #el.content == 3 and el.content[1].t == 'Math'
+      and el.content[1].mathtype == 'DisplayMath' and el.content[3].t == 'Str' then
+    return el.content[3].text:match('^{#(eq:[^}]+)}$')
+  end
+end
+
+-- The paragraph right after a numbered formula that starts with «где» lists one
+-- symbol per source line. Each line becomes a paragraph in the Where style.
+local function split_where(blocks)
+  local result = pandoc.Blocks({})
+  local previous = nil
+  for _, block in ipairs(blocks) do
+    local first = block.t == 'Para' and block.content[1] or nil
+    if previous and equation_label(previous) and first and first.t == 'Str'
+        and pandoc.text.lower(first.text):match('^где[,:]?$') then
+      local lines = {pandoc.Inlines({})}
+      for _, inline in ipairs(block.content) do
+        if inline.t == 'SoftBreak' then table.insert(lines, pandoc.Inlines({}))
+        else lines[#lines]:insert(inline) end
+      end
+      local paras = pandoc.Blocks({})
+      for _, line in ipairs(lines) do
+        while #line > 0 and line[1].t == 'Space' do line:remove(1) end
+        while #line > 0 and line[#line].t == 'Space' do line:remove(#line) end
+        if #line > 0 then paras:insert(pandoc.Para(line)) end
+      end
+      result:insert(pandoc.Div(paras, pandoc.Attr('', {}, {{'custom-style', 'Where'}})))
+    else
+      result:insert(block)
+    end
+    previous = block
+  end
+  return result
+end
+
 function Pandoc(doc)
+  doc = doc:walk { Blocks = split_where }
   local section = ''
   local counts = {fig = 0, tbl = 0, eq = 0}
   local labels = {}
@@ -45,16 +83,12 @@ function Pandoc(doc)
       return el
     end,
     Para = function(el)
-      -- Pandoc parses $$...$$ {#eq:id} as Math + Space + Str, not a Span.
-      if #el.content == 3 and el.content[1].t == 'Math'
-          and el.content[1].mathtype == 'DisplayMath' and el.content[3].t == 'Str' then
-        local id = el.content[3].text:match('^{#(eq:[^}]+)}$')
-        if id then
-          local number = next_number('eq', id)
-          local math = el.content[1]
-          math.text = math.text .. '\\qquad{(' .. number .. ')}'
-          el.content = pandoc.Inlines({math})
-        end
+      local id = equation_label(el)
+      if id then
+        local number = next_number('eq', id)
+        local math = el.content[1]
+        math.text = math.text .. '\\qquad{(' .. number .. ')}'
+        el.content = pandoc.Inlines({math})
       end
       return el
     end
@@ -69,8 +103,8 @@ function Pandoc(doc)
         if i > 1 then content:insert(pandoc.Str(';')); content:insert(pandoc.Space()) end
         content:extend(cit.prefix)
         if #cit.prefix > 0 then content:insert(pandoc.Space()) end
-        local prefix = ({fig = 'рис. ', tbl = 'табл. ', eq = ''})[kind]
-        content:insert(pandoc.Str(prefix .. (kind == 'eq' and ('(' .. labels[cit.id] .. ')') or labels[cit.id])))
+        -- Only the number: the author writes «Рисунке», «Таблицы» in the right case.
+        content:insert(pandoc.Str(kind == 'eq' and ('(' .. labels[cit.id] .. ')') or labels[cit.id]))
         if #cit.suffix > 0 then content:insert(pandoc.Space()); content:extend(cit.suffix) end
       end
       return content

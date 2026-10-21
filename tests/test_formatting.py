@@ -8,7 +8,8 @@ from click.testing import CliRunner
 
 from md2gost.cli import cli
 from md2gost.converter import BUILTIN_TEMPLATE, ConvertOptions, convert
-from md2gost.formatting import NS, tag, parse, serialize, rewrite_package
+from md2gost.formatting import (CELL_MARGIN_X, CELL_MARGIN_Y, EQUATION_SPACING, NS, tag, parse,
+                                serialize, rewrite_package, text_width)
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'formatting' / 'diploma.md'
 
@@ -65,7 +66,10 @@ def test_caption_numbers_and_forward_references(converted):
                      'Таблица Б.1 – Длинная таблица', 'Рисунок 1.1 – Порядок обработки',
                      'Рисунок 2.1 – Схема обработки', 'Рисунок А.1 – Схема приложения']:
         assert expected in values
-    assert any('будущий рисунок: рис. 2.1' in value for value in values)
+    # References render as a bare number; the noun comes from the author.
+    assert any('будущий Рисунок 2.1.' in value for value in values)
+    assert any('приведено в Таблице 1.1.' in value for value in values)
+    assert not any('рис.' in value or 'табл.' in value for value in values)
     assert '@fig:' not in text(root) and '@tbl:' not in text(root) and '@eq:' not in text(root)
 
 
@@ -125,18 +129,18 @@ def test_tables_and_listing_chunks(converted):
     values = [text(p) for p in root.findall('.//w:p', NS)]
     assert 'Продолжение листинга А.1 – Проверочный модуль' in values
     assert 'Окончание листинга А.1 – Проверочный модуль' in values
-    assert len(root.findall('.//w:tblHeader', NS)) == 5
+    assert len(root.findall('.//w:tblHeader', NS)) == 6
 
 
-def test_table_header_centered_and_other_cells_justified(converted):
+def test_table_header_centered_and_other_cells_left_aligned(converted):
     root = read_part(converted, 'word/document.xml')
     tables = [t for t in root.findall('.//w:tbl', NS)
               if t.find('w:tr/w:trPr/w:tblHeader', NS) is not None]
-    assert len(tables) == 5
+    assert len(tables) == 6
     for table in tables:
         for index, row in enumerate(table.findall('w:tr', NS)):
             for p in row.findall('.//w:p', NS):
-                assert p.find('w:pPr/w:jc', NS).get(tag('val')) == ('center' if index == 0 else 'both')
+                assert p.find('w:pPr/w:jc', NS).get(tag('val')) == ('center' if index == 0 else 'left')
 
 
 def test_table_alignment_overrides_markdown_columns(tmp_path):
@@ -146,7 +150,7 @@ def test_table_alignment_overrides_markdown_columns(tmp_path):
     output = tmp_path / 'alignment.docx'
     convert(source, output, options=ConvertOptions(toc=False, title_page=False))
     rows = read_part(output, 'word/document.xml').findall('.//w:tbl/w:tr', NS)
-    for row, expected in zip(rows, ['center', 'both'], strict=True):
+    for row, expected in zip(rows, ['center', 'left'], strict=True):
         assert [p.find('w:pPr/w:jc', NS).get(tag('val'))
                 for p in row.findall('.//w:p', NS)] == [expected] * 3
 
@@ -194,7 +198,7 @@ def test_appendix_subsections_and_grouped_refs(tmp_path):
     assert 'А.1 Подраздел' in actual
     assert 'А.1.1 Пункт' in actual
     assert 'Б.1 Подраздел' in actual
-    assert 'См. табл. А.1; (А.1).' in actual
+    assert 'См. А.1; (А.1).' in actual
 
 
 def test_template_itself_matches_sample():
@@ -239,3 +243,141 @@ def test_adjacent_table_spacing():
         spacing = p.find('w:pPr/w:spacing', NS)
         assert spacing.get(tag('line')) == '120'
         assert spacing.get(tag('before')) == spacing.get(tag('after')) == '0'
+
+
+def build(tmp_path, markdown, name='sample'):
+    source = tmp_path / f'{name}.md'
+    source.write_text(markdown, encoding='utf-8')
+    output = tmp_path / f'{name}.docx'
+    convert(source, output, options=ConvertOptions(toc=False, title_page=False))
+    return output
+
+
+def grid(table):
+    return [int(c.get(tag('w'))) for c in table.findall('w:tblGrid/w:gridCol', NS)]
+
+
+def test_columns_fit_content(tmp_path):
+    """B1: equal Markdown columns are resized by content to the text width."""
+    long = 'Прогнозируемое число клиентских чтений объекта за горизонт прогноза ' * 2
+    output = build(tmp_path, '## Раздел\n\n| Обозначение | Смысл |\n|---|---|\n'
+                   f'| $\\hat N_i$ | {long}|\n| $c_{{\\mathrm{{HOT}}}}$ | Постоянная часть |\n')
+    table = read_part(output, 'word/document.xml').find('.//w:tbl', NS)
+    widths = grid(table)
+    assert sum(widths) == 9638
+    assert widths[0] * 3 < widths[1]
+    # The header word must not break in the middle.
+    assert widths[0] >= text_width('Обозначение', bold=True) + 2 * CELL_MARGIN_X
+    for row in table.findall('w:tr', NS):
+        cells = [c.find('w:tcPr/w:tcW', NS) for c in row.findall('w:tc', NS)]
+        assert [int(c.get(tag('w'))) for c in cells] == widths
+        assert {c.get(tag('type')) for c in cells} == {'dxa'}
+    tpr = table.find('w:tblPr', NS)
+    assert tpr.find('w:tblLayout', NS).get(tag('type')) == 'autofit'
+    assert tpr.find('w:tblW', NS).get(tag('w')) == '9638'
+    assert tpr.find('w:tblW', NS).get(tag('type')) == 'dxa'
+
+
+def test_column_width_counts_formula_text(tmp_path):
+    """B1: visible formula symbols (m:t) widen their column."""
+    formula = ' + '.join(f'x_{{{i}}}' for i in range(1, 15))
+    output = build(tmp_path, f'## Раздел\n\n| A | Описание |\n|---|---|\n| ${formula}$ | Сумма |\n')
+    widths = grid(read_part(output, 'word/document.xml').find('.//w:tbl', NS))
+    assert widths[0] > widths[1]
+
+
+def test_author_column_widths_are_kept(tmp_path):
+    """B1: unequal widths from the Markdown separator line stay as written."""
+    long = 'длинный текст ячейки, который не помещается в строку исходника ' * 2
+    output = build(tmp_path, f'## Раздел\n\n| A | B |\n|---|------|\n| 1 | {long}|\n')
+    table = read_part(output, 'word/document.xml').find('.//w:tbl', NS)
+    widths = grid(table)
+    assert widths[1] == 2 * widths[0]
+    assert table.find('w:tblPr/w:tblLayout', NS).get(tag('type')) == 'fixed'
+
+
+def test_fixture_table_widths_follow_section(converted):
+    """B1: portrait tables fill 9638 twips, the landscape table 14570; listings are untouched."""
+    root = read_part(converted, 'word/document.xml')
+    tables = [t for t in root.findall('.//w:tbl', NS)
+              if t.find('w:tr/w:trPr/w:tblHeader', NS) is not None]
+    sums = [sum(grid(t)) for t in tables]
+    assert sums == [9638, 9638, 9638, 9638, 9638, 14570]
+    notation = next(t for t in tables if text(t).startswith('Обозначение'))
+    assert grid(notation)[0] * 2 < grid(notation)[1]
+    listings = [t for t in root.findall('.//w:tbl', NS) if t not in tables]
+    assert all(t.find('w:tblPr/w:tblLayout', NS) is None for t in listings)
+
+
+def test_table_cell_margins(converted):
+    """B2: a small gap above and below cell text; listings keep their own margins."""
+    root = read_part(converted, 'word/document.xml')
+    for table in root.findall('.//w:tbl', NS):
+        margins = table.find('w:tblPr/w:tblCellMar', NS)
+        values = {edge: int(margins.find(f'w:{edge}', NS).get(tag('w')))
+                  for edge in ['top', 'left', 'bottom', 'right']}
+        if table.find('w:tr/w:trPr/w:tblHeader', NS) is not None:
+            assert values == {'top': CELL_MARGIN_Y, 'bottom': CELL_MARGIN_Y,
+                              'left': CELL_MARGIN_X, 'right': CELL_MARGIN_X}
+            assert CELL_MARGIN_Y == 57 and CELL_MARGIN_X == 108
+        else:
+            assert values == {'top': 40, 'bottom': 40, 'left': 80, 'right': 80}
+
+
+def test_free_line_around_equations(converted):
+    """B3: one body line (spacing, not empty paragraphs) above and below a formula."""
+    assert EQUATION_SPACING == 480
+    body = read_part(converted, 'word/document.xml').find('w:body', NS)
+    blocks = [el for el in body if el.tag in (tag('p'), tag('tbl'))]
+    numbered = [p for p in blocks if text(p) in ['(2.1)', '(А.1)']]
+    assert len(numbered) == 2
+    for p in numbered:
+        spacing = p.find('w:pPr/w:spacing', NS)
+        assert spacing.get(tag('before')) == spacing.get(tag('after')) == str(EQUATION_SPACING)
+        index = blocks.index(p)
+        assert ''.join(blocks[index - 1].itertext()).strip()
+        assert ''.join(blocks[index + 1].itertext()).strip()
+
+
+def test_where_lines_after_equation(tmp_path):
+    """B4: «где» after a labelled formula splits into Where paragraphs without indent."""
+    output = build(tmp_path, '## Раздел\n\n$$\nx = y\n$$ {#eq:a}\n\n'
+                   'где $x$ – первое;\n$y$ – второе.\n\n'
+                   'где это обычный абзац.\n\n'
+                   '$$\nz = 1\n$$ {#eq:b}\n\nЗдесь $z$ – не расшифровка.\n\n'
+                   '$$\nw = 2\n$$\n\nгде $w$ – формула без номера.\n')
+    paras = read_part(output, 'word/document.xml').findall('.//w:body/w:p', NS)
+    def style(p):
+        sid = p.find('w:pPr/w:pStyle', NS)
+        return sid.get(tag('val')) if sid is not None else ''
+    where = [''.join(p.itertext()) for p in paras if style(p) == 'Where']
+    assert where == ['где x – первое;', 'y – второе.']
+    others = [''.join(p.itertext()) for p in paras if style(p) != 'Where']
+    assert 'где это обычный абзац.' in others
+    assert 'где w – формула без номера.' in others
+    styles = read_part(output, 'word/styles.xml')
+    s = styles.find("w:style[@w:styleId='Where']", NS)
+    assert s.find('w:pPr/w:ind', NS).get(tag('firstLine')) == '0'
+    assert s.find('w:pPr/w:jc', NS).get(tag('val')) == 'both'
+    spacing = s.find('w:pPr/w:spacing', NS)
+    assert (spacing.get(tag('before')), spacing.get(tag('after')), spacing.get(tag('line'))) == ('0', '0', '360')
+
+
+def test_fixture_where_paragraph(converted):
+    """B4: explanations after (2.1) and (А.1) become Where lines."""
+    body = read_part(converted, 'word/document.xml').find('w:body', NS)
+    where = [p for p in body.findall('w:p', NS)
+             if p.find("w:pPr/w:pStyle[@w:val='Where']", NS) is not None]
+    assert [''.join(p.itertext()) for p in where] == [
+        'где a — число успешных операций;', 'b — общее число операций.',
+        'где c — итоговое значение.']
+
+
+def test_references_render_number_only(tmp_path):
+    """B5: @fig/@tbl give only the number, @eq stays in parentheses."""
+    output = build(tmp_path, '## Раздел\n\nНа Рисунке @fig:a показано, в Таблице @tbl:b приведено, '
+                   'по формуле @eq:c считается.\n\n![Схема](x.png){#fig:a}\n\n'
+                   ': Данные {#tbl:b}\n\n| X |\n|---|\n| 1 |\n\n$$ a = b $$ {#eq:c}\n')
+    actual = text(read_part(output, 'word/document.xml'))
+    assert 'На Рисунке 1.1 показано, в Таблице 1.1 приведено, по формуле (1.1) считается.' in actual
+    assert 'рис.' not in actual and 'табл.' not in actual

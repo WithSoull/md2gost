@@ -46,6 +46,8 @@ def test_build_command_default():
     last_lua_idx = lua_idxs[-1]
     xref_idx = cmd.index("pandoc-crossref")
     assert last_lua_idx < xref_idx
+    # References render as a bare number; the author writes the noun.
+    assert not any(arg.startswith("figPrefix") for arg in cmd)
 
 
 def test_build_command_no_toc():
