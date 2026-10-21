@@ -108,8 +108,8 @@ def _check_image_paths(lines: list[str], base_dir: Path) -> list[ValidationWarni
 
 def _check_crossref_syntax(lines: list[str]) -> list[ValidationWarning]:
     warnings: list[ValidationWarning] = []
-    ref_re = re.compile(r"@(fig|tbl|eq):(\w+)")
-    anchor_re = re.compile(r"\{#(fig|tbl|eq):(\w+)\}")
+    ref_re = re.compile(r"@(fig|tbl|eq):([\w.-]*[\w-])")
+    anchor_re = re.compile(r"\{#(fig|tbl|eq):([\w.-]+)(?=\s|\})")
 
     text = "\n".join(lines)
     anchors = {(t, n) for t, n in anchor_re.findall(text)}

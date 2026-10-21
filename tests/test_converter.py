@@ -1,3 +1,4 @@
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -60,6 +61,15 @@ def test_build_command_toc_depth():
     assert cmd[idx + 1] == "2"
 
 
+def test_build_command_no_title_page():
+    opts = ConvertOptions(title_page=False)
+    cmd = build_command(Path("in.md"), Path("out.docx"), Path("tmpl.docx"), opts)
+    metadata = [cmd[i + 1] for i, arg in enumerate(cmd[:-1]) if arg == "-M"]
+    assert "title=" in metadata
+    assert "author=" in metadata
+    assert "date=" in metadata
+
+
 def test_missing_pandoc():
     with patch("shutil.which", return_value=None):
         with pytest.raises(RuntimeError, match="Не найдены в PATH"):
@@ -95,3 +105,22 @@ def test_default_output_name(tmp_path):
     out, _ = convert(md, template=MINIMAL_TEMPLATE)
     assert out == tmp_path / "report.docx"
     assert out.exists()
+
+
+def test_convert_without_title_page(tmp_path):
+    _ensure_minimal_template()
+    out = tmp_path / "without-title.docx"
+    convert(
+        FIXTURES / "valid.md",
+        output_path=out,
+        template=MINIMAL_TEMPLATE,
+        options=ConvertOptions(title_page=False),
+    )
+
+    with zipfile.ZipFile(out) as docx:
+        document_xml = docx.read("word/document.xml").decode("utf-8")
+
+    assert "Отчёт по практике" not in document_xml
+    assert "Иванов И.И." not in document_xml
+    assert "2026-04-25" not in document_xml
+    assert "ВВЕДЕНИЕ" in document_xml

@@ -10,8 +10,13 @@ from .validator import ValidationError, print_warnings, validate
 from .watcher import watch as _watch
 
 
-def _make_options(toc_depth: int, no_toc: bool) -> ConvertOptions:
-    return ConvertOptions(toc=not no_toc, toc_depth=toc_depth)
+def _make_options(toc_depth: int, no_toc: bool, no_title_page: bool, page_start: int = 1) -> ConvertOptions:
+    return ConvertOptions(
+        toc=not no_toc,
+        toc_depth=toc_depth,
+        title_page=not no_title_page,
+        page_start=page_start,
+    )
 
 
 _shared_options = [
@@ -20,10 +25,14 @@ _shared_options = [
                  help="Путь для сохранения .docx (по умолчанию рядом с входным файлом)"),
     click.option("-t", "--template", "template", type=click.Path(exists=True), default=None,
                  help="Свой reference.docx шаблон"),
-    click.option("--toc-depth", default=3, show_default=True,
+    click.option("--toc-depth", type=click.IntRange(1, 3), default=3, show_default=True,
                  help="Глубина оглавления"),
     click.option("--no-toc", is_flag=True, default=False,
                  help="Отключить оглавление"),
+    click.option("--no-title-page", is_flag=True, default=False,
+                 help="Не добавлять титульный блок из title, author и date"),
+    click.option("--page-start", type=click.IntRange(min=1), default=1, show_default=True,
+                 help="Начальный номер страницы для встроенного шаблона"),
     click.option("--no-validate", is_flag=True, default=False,
                  help="Пропустить валидацию"),
 ]
@@ -48,6 +57,8 @@ def convert_cmd(
     template: str | None,
     toc_depth: int,
     no_toc: bool,
+    no_title_page: bool,
+    page_start: int,
     no_validate: bool,
 ) -> None:
     """Конвертировать Markdown в DOCX по ГОСТ 7.32."""
@@ -67,7 +78,7 @@ def convert_cmd(
             input_path,
             output_path,
             template,
-            _make_options(toc_depth, no_toc),
+            _make_options(toc_depth, no_toc, no_title_page, page_start),
         )
         click.echo(f"✓ {out} готов ({elapsed:.1f}s)")
     except ConversionError as exc:
@@ -86,6 +97,8 @@ def watch_cmd(
     template: str | None,
     toc_depth: int,
     no_toc: bool,
+    no_title_page: bool,
+    page_start: int,
     no_validate: bool,
 ) -> None:
     """Следить за файлом и конвертировать при каждом изменении."""
@@ -93,6 +106,6 @@ def watch_cmd(
         input_path=input_file,
         output_path=output,
         template=template,
-        options=_make_options(toc_depth, no_toc),
+        options=_make_options(toc_depth, no_toc, no_title_page, page_start),
         no_validate=no_validate,
     )

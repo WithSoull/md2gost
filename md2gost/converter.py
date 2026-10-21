@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
+from .formatting import apply_sample_layout, fix_equations, parse, serialize, rewrite_package
+
 
 BUILTIN_TEMPLATE = Path(__file__).parent / "templates" / "gost-7.32.docx"
 UPPERCASE_H1_FILTER = Path(__file__).parent / "filters" / "uppercase-h1.lua"
@@ -24,6 +26,8 @@ class ConversionError(Exception):
 class ConvertOptions:
     toc: bool = True
     toc_depth: int = 3
+    title_page: bool = True
+    page_start: int = 1
 
 
 def check_dependencies() -> None:
@@ -41,6 +45,9 @@ def build_command(
     cmd = [
         "pandoc",
         str(input_path),
+        "--from", "markdown+lists_without_preceding_blankline",
+        "--resource-path", str(input_path.resolve().parent),
+        "--syntax-highlighting=none",
         "--reference-doc", str(template),
         "--lua-filter", str(UPPERCASE_H1_FILTER),
         "--lua-filter", str(GOST_TABLES_FILTER),
@@ -52,90 +59,20 @@ def build_command(
         "-o", str(output_path),
     ]
     if options.toc:
-        cmd += ["--toc", "--toc-depth", str(options.toc_depth), "-M", "toc-title=Содержание"]
+        cmd += ["--toc", "--toc-depth", str(options.toc_depth), "-M", "toc-title=СОДЕРЖАНИЕ"]
+    if not options.title_page:
+        cmd += ["-M", "title=", "-M", "author=", "-M", "date="]
     return cmd
 
 
-_QQUAD_TAIL_RE = re.compile(
-    r'<m:r><m:t>\s{2}</m:t></m:r>'
-    r'<m:r><m:rPr><m:sty m:val="p"\s*/></m:rPr><m:t>\(</m:t></m:r>'
-    r'<m:r><m:t>(\d+)</m:t></m:r>'
-    r'<m:r><m:rPr><m:sty m:val="p"\s*/></m:rPr><m:t>\)</m:t></m:r>'
-    r'</m:oMath>'
-)
-
-_OMATH_PARA_WRAP_RE = re.compile(
-    r'<m:oMathPara><m:oMathParaPr><m:jc m:val="center"\s*/></m:oMathParaPr>'
-    r'(.*?)'
-    r'</m:oMathPara>'
-)
-
-_EQ_PARA_RE = re.compile(r'(<w:p\b[^>]*>)(.*?)(</w:p>)', re.DOTALL)
-
-_TAB_STOPS = (
-    '<w:tabs>'
-    '<w:tab w:val="center" w:pos="4820"/>'
-    '<w:tab w:val="right" w:pos="9639"/>'
-    '</w:tabs>'
-)
-_TAB_RUN = '<w:r><w:tab/></w:r>'
-
-
 def _fix_equations(docx_path: Path) -> None:
-    with zipfile.ZipFile(docx_path, "r") as zin:
-        doc_xml = zin.read("word/document.xml").decode("utf-8")
-
-    if "<m:oMathPara>" not in doc_xml:
-        return
-
-    def _rewrite_para(m: re.Match) -> str:
-        p_open, body, p_close = m.group(1), m.group(2), m.group(3)
-        tail_match = _QQUAD_TAIL_RE.search(body)
-        if not tail_match:
-            return m.group(0)
-
-        eq_num = tail_match.group(1)
-        body = body[:tail_match.start()] + "</m:oMath>" + body[tail_match.end():]
-
-        wrap_match = _OMATH_PARA_WRAP_RE.search(body)
-        if wrap_match:
-            omath = wrap_match.group(1)
-            body = body[:wrap_match.start()] + omath + body[wrap_match.end():]
-
-        ppr_close = "</w:pPr>"
-        idx = body.find(ppr_close)
-        if idx != -1:
-            body = body[:idx] + _TAB_STOPS + ppr_close + _TAB_RUN + body[idx + len(ppr_close):]
-        else:
-            body = "<w:pPr>" + _TAB_STOPS + "</w:pPr>" + _TAB_RUN + body
-
-        eq_num_run = (
-            '<w:r><w:rPr>'
-            '<w:sz w:val="28"/><w:szCs w:val="28"/>'
-            '</w:rPr>'
-            f'<w:t>({eq_num})</w:t></w:r>'
-        )
-        body = body + _TAB_RUN + eq_num_run
-
-        return p_open + body + p_close
-
-    new_xml = _EQ_PARA_RE.sub(
-        lambda m: _rewrite_para(m) if "m:oMathPara" in m.group(2) else m.group(0),
-        doc_xml,
-    )
-
-    if new_xml == doc_xml:
-        return
-
-    buf = BytesIO()
-    with zipfile.ZipFile(docx_path, "r") as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
-        for item in zin.infolist():
-            if item.filename == "word/document.xml":
-                zout.writestr(item, new_xml.encode("utf-8"))
-            else:
-                zout.writestr(item, zin.read(item.filename))
-
-    docx_path.write_bytes(buf.getvalue())
+    with zipfile.ZipFile(docx_path) as source:
+        original = source.read("word/document.xml")
+    root = parse(original)
+    fix_equations(root)
+    rewritten = serialize(root, original)
+    if rewritten != original:
+        rewrite_package(docx_path, {"word/document.xml": rewritten})
 
 
 _BLOCK_RE = re.compile(r'<w:p\b[^>]*>.*?</w:p>|<w:tbl>.*?</w:tbl>', re.DOTALL)
@@ -213,6 +150,9 @@ def convert(
     if options is None:
         options = ConvertOptions()
 
+    if options.page_start < 1:
+        raise ConversionError("Начальный номер страницы должен быть положительным")
+
     check_dependencies()
 
     cmd = build_command(input_path, output_path, template, options)
@@ -224,7 +164,10 @@ def convert(
     if result.returncode != 0:
         raise ConversionError(result.stderr.strip() or f"pandoc завершился с кодом {result.returncode}")
 
-    _fix_equations(output_path)
-    _fix_keep_with_media(output_path)
+    if template.resolve() == BUILTIN_TEMPLATE.resolve():
+        apply_sample_layout(output_path, page_start=options.page_start)
+    else:
+        _fix_equations(output_path)
+        _fix_keep_with_media(output_path)
 
     return output_path, elapsed

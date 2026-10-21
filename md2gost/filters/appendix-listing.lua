@@ -13,7 +13,7 @@ end
 local function make_caption(text)
   return string.format(
     '<w:p>'
-    .. '<w:pPr><w:spacing w:after="120"/></w:pPr>'
+    .. '<w:pPr><w:pStyle w:val="GOSTListingCaption"/><w:keepNext/><w:spacing w:before="120" w:after="0"/></w:pPr>'
     .. '<w:r><w:rPr></w:rPr>'
     .. '<w:t xml:space="preserve">%s</w:t></w:r>'
     .. '</w:p>',
@@ -25,7 +25,7 @@ local function make_code_paragraph(line)
   return string.format(
     '<w:p>'
     .. '<w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/>'
-    .. '<w:ind w:firstLine="0"/></w:pPr>'
+    .. '<w:ind w:firstLine="0"/><w:jc w:val="left"/><w:wordWrap w:val="1"/></w:pPr>'
     .. '<w:r><w:rPr>'
     .. '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:cs="Courier New"/>'
     .. '<w:sz w:val="20"/><w:szCs w:val="20"/>'
@@ -54,7 +54,7 @@ local function make_table(code_paragraphs)
     ..     '<w:right w:w="80" w:type="dxa"/>'
     ..   '</w:tblCellMar>'
     .. '</w:tblPr>'
-    .. '<w:tr><w:tc>'
+    .. '<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc>'
     ..   '<w:tcPr><w:tcW w:w="5000" w:type="pct"/></w:tcPr>'
     ..   '%s'
     .. '</w:tc></w:tr>'
@@ -79,8 +79,7 @@ function CodeBlock(el)
 
   rest = rest:gsub("%s+$", "")
 
-  local listing_id = first_line:match("^(Листинг%s+%S+)")
-  local continuation_caption = listing_id and (listing_id .. " – Продолжение") or (first_line .. " – Продолжение")
+  local continuation_caption = 'Продолжение ' .. first_line:gsub('^Листинг', 'листинга')
 
   local lines = {}
   for line in (rest .. "\n"):gmatch("([^\n]*)\n") do
@@ -88,13 +87,21 @@ function CodeBlock(el)
   end
 
   local chunks = {}
-  for i = 1, #lines, MAX_LINES_PER_TABLE do
-    local chunk = {}
-    for j = i, math.min(i + MAX_LINES_PER_TABLE - 1, #lines) do
-      table.insert(chunk, lines[j])
+  local chunk = {}
+  local visual_lines = 0
+  for _, line in ipairs(lines) do
+    -- Courier New 10pt: at most 76 characters across the portrait text area.
+    local length = utf8.len(line) or #line
+    local needed = math.max(1, math.ceil(length / 76))
+    if visual_lines + needed > MAX_LINES_PER_TABLE and #chunk > 0 then
+      table.insert(chunks, chunk)
+      chunk = {}
+      visual_lines = 0
     end
-    table.insert(chunks, chunk)
+    table.insert(chunk, line)
+    visual_lines = visual_lines + needed
   end
+  if #chunk > 0 then table.insert(chunks, chunk) end
 
   local blocks = {}
   for idx, chunk in ipairs(chunks) do
@@ -102,7 +109,7 @@ function CodeBlock(el)
     if idx == 1 then
       caption = first_line
     elseif idx == #chunks then
-      caption = listing_id and (listing_id .. " – Окончание") or (first_line .. " – Окончание")
+      caption = 'Окончание ' .. first_line:gsub('^Листинг', 'листинга')
     else
       caption = continuation_caption
     end

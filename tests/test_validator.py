@@ -82,3 +82,12 @@ def test_invalid_encoding(tmp_path):
     bad.write_bytes(b"\xff\xfe bad encoding")
     with pytest.raises(ValidationError):
         validate(bad)
+
+
+def test_crossref_attributes_and_complete_identifiers(tmp_path):
+    md = tmp_path / 'refs.md'
+    md.write_text('![рис](r.png){#fig:scheme-first width=80%}\n\n'
+                  'См. @fig:scheme-first. И @fig:scheme-other.\n', encoding='utf-8')
+    messages = [w.message for w in validate(md)]
+    assert not any('@fig:scheme-first' in message for message in messages)
+    assert any('@fig:scheme-other' in message for message in messages)
