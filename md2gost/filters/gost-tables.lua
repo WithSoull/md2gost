@@ -122,8 +122,24 @@ function Pandoc(doc)
       return el
     end
   }
+  -- Three or more consecutive formulas in one group read as a range: «2.5 – 2.9».
+  local function equation_range(citations)
+    if #citations < 3 then return nil end
+    local chapter, previous
+    for _, cit in ipairs(citations) do
+      local label = cit.id:match('^eq:') and labels[cit.id]
+      if not label or #cit.prefix > 0 or #cit.suffix > 0 then return nil end
+      local head, n = label:match('^(.-)(%d+)$')
+      n = tonumber(n)
+      if previous and (head ~= chapter or n ~= previous + 1) then return nil end
+      chapter, previous = head, n
+    end
+    return labels[citations[1].id] .. ' – ' .. labels[citations[#citations].id]
+  end
   doc = doc:walk {
     Cite = function(el)
+      local range = equation_range(el.citations)
+      if range then return pandoc.Str(range) end
       local content = pandoc.Inlines({})
       for i, cit in ipairs(el.citations) do
         local kind = cit.id:match('^(fig):') or cit.id:match('^(tbl):') or cit.id:match('^(eq):')
