@@ -9,11 +9,12 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from .formatting import apply_sample_layout, fix_equations, parse, serialize, rewrite_package
+from .formatting import apply_rules_layout, fix_equations, parse, serialize, rewrite_package
 
 
 BUILTIN_TEMPLATE = Path(__file__).parent / "templates" / "gost-7.32.docx"
 UPPERCASE_H1_FILTER = Path(__file__).parent / "filters" / "uppercase-h1.lua"
+GOST_TEXT_FILTER = Path(__file__).parent / "filters" / "gost-text.lua"
 GOST_TABLES_FILTER = Path(__file__).parent / "filters" / "gost-tables.lua"
 APPENDIX_LISTING_FILTER = Path(__file__).parent / "filters" / "appendix-listing.lua"
 
@@ -28,6 +29,10 @@ class ConvertOptions:
     toc_depth: int = 3
     title_page: bool = True
     page_start: int = 1
+    paginate: bool = False
+    libreoffice: str | None = None
+    # Final layout may move paragraphs before a figure to fill a page (rules 1.14).
+    move_text: bool = True
 
 
 def check_dependencies() -> None:
@@ -50,6 +55,7 @@ def build_command(
         "--syntax-highlighting=none",
         "--reference-doc", str(template),
         "--lua-filter", str(UPPERCASE_H1_FILTER),
+        "--lua-filter", str(GOST_TEXT_FILTER),
         "--lua-filter", str(GOST_TABLES_FILTER),
         "--lua-filter", str(APPENDIX_LISTING_FILTER),
         "--filter", "pandoc-crossref",
@@ -152,6 +158,9 @@ def convert(
     if options.page_start < 1:
         raise ConversionError("Начальный номер страницы должен быть положительным")
 
+    if options.paginate and template.resolve() != BUILTIN_TEMPLATE.resolve():
+        raise ConversionError('--paginate поддерживается только со встроенным шаблоном')
+
     check_dependencies()
 
     cmd = build_command(input_path, output_path, template, options)
@@ -164,9 +173,19 @@ def convert(
         raise ConversionError(result.stderr.strip() or f"pandoc завершился с кодом {result.returncode}")
 
     if template.resolve() == BUILTIN_TEMPLATE.resolve():
-        apply_sample_layout(output_path, page_start=options.page_start)
+        try:
+            apply_rules_layout(output_path, page_start=options.page_start)
+        except ValueError as exc:
+            raise ConversionError(str(exc)) from exc
     else:
         _fix_equations(output_path)
         _fix_keep_with_media(output_path)
 
-    return output_path, elapsed
+    if options.paginate:
+        from .pagination import paginate, PaginationError
+        try:
+            paginate(output_path, executable=options.libreoffice, page_start=options.page_start,
+                     move_text=options.move_text)
+        except PaginationError as exc:
+            raise ConversionError(str(exc)) from exc
+    return output_path, time.monotonic() - t0

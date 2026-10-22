@@ -23,6 +23,14 @@ def text(el):
     return ''.join(t.text or '' for t in el.iter(tag('t')))
 
 
+def tabbed(el):
+    """Visible text with tabs, as a reader sees «где» lines."""
+    math = '{http://schemas.openxmlformats.org/officeDocument/2006/math}t'
+    return ''.join('\t' if x.tag == tag('tab') else x.text or ''
+                   for x in el.iter() if x.tag in (tag('t'), tag('tab'), math)
+                   and not (x.tag == tag('tab') and x.get(tag('val'))))
+
+
 @pytest.fixture(scope='module')
 def converted(tmp_path_factory):
     output = tmp_path_factory.mktemp('layout') / 'diploma.docx'
@@ -61,10 +69,10 @@ def test_headings_and_no_empty_title_block(converted):
 def test_caption_numbers_and_forward_references(converted):
     root = read_part(converted, 'word/document.xml')
     values = [text(p) for p in root.findall('.//w:p', NS)]
-    for expected in ['Таблица 1.1 – Сравнение решений', 'Таблица 1.2 – Дополнительные показатели',
-                     'Таблица 2.1 – Характеристики метода', 'Таблица А.1 – Данные приложения',
-                     'Таблица Б.1 – Длинная таблица', 'Рисунок 1.1 – Порядок обработки',
-                     'Рисунок 2.1 – Схема обработки', 'Рисунок А.1 – Схема приложения']:
+    for expected in ['Таблица 1.1 — Сравнение решений', 'Таблица 1.2 — Дополнительные показатели',
+                     'Таблица 2.1 — Характеристики метода', 'Таблица А.1 — Данные приложения',
+                     'Таблица Б.1 — Длинная таблица', 'Рисунок 1.1 — Порядок обработки',
+                     'Рисунок 2.1 — Схема обработки', 'Рисунок А.1 — Схема приложения']:
         assert expected in values
     # References render as a bare number; the noun comes from the author.
     assert any('будущий Рисунок 2.1.' in value for value in values)
@@ -75,8 +83,8 @@ def test_caption_numbers_and_forward_references(converted):
 
 def test_equation_numbers_are_outside_math(converted):
     root = read_part(converted, 'word/document.xml')
-    numbered = [p for p in root.findall('.//w:p', NS) if text(p) in ['(2.1)', '(А.1)']]
-    assert len(numbered) == 2
+    numbered = [p for p in root.findall('.//w:p', NS) if text(p) in ['(2.1)']]
+    assert len(numbered) == 1
     for p in numbered:
         assert p.find('m:oMath', NS) is not None
         assert p.find('m:oMathPara', NS) is None
@@ -96,9 +104,9 @@ def test_body_headings_captions_and_code_styles(converted):
         assert s.find('w:pPr/w:ind', NS).get(tag('firstLine')) == '709'
     for level, size in [(1, '36'), (2, '32'), (3, '28')]:
         assert by_name[f'heading {level}'].find('w:rPr/w:sz', NS).get(tag('val')) == size
-    assert by_name['table caption'].find('w:pPr/w:jc', NS).get(tag('val')) == 'left'
+    assert by_name['table caption'].find('w:pPr/w:jc', NS).get(tag('val')) == 'both'
     assert by_name['table caption'].find('w:rPr/w:i', NS).get(tag('val')) == '1'
-    assert by_name['table caption'].find('w:pPr/w:spacing', NS).get(tag('after')) == '120'
+    assert by_name['table caption'].find('w:pPr/w:spacing', NS).get(tag('after')) == '0'
     assert by_name['image caption'].find('w:rPr/w:b', NS).get(tag('val')) == '1'
     assert by_name['source code'].find('w:rPr/w:rFonts', NS).get(tag('ascii')) == 'Courier New'
     assert by_name['source code'].find('w:rPr/w:sz', NS).get(tag('val')) == '20'
@@ -120,16 +128,35 @@ def test_toc_after_annotation_and_includes_structural_parts(converted):
     assert field_kinds == ['begin', 'separate', 'end']
 
 
-def test_tables_and_listing_chunks(converted):
+def test_listing_is_a_frame_with_one_row_per_line(converted):
+    """Rules 8.4–8.5: a framed listing; rows let pagination cut it at a page end."""
     root = read_part(converted, 'word/document.xml')
     listing_tables = [t for t in root.findall('.//w:tbl', NS)
                       if any(f.get(tag('ascii')) == 'Courier New' for f in t.findall('.//w:rFonts', NS))]
-    assert len(listing_tables) == 3
-    assert all(t.find('w:tr/w:trPr/w:cantSplit', NS) is not None for t in listing_tables)
+    assert len(listing_tables) == 1
+    rows = listing_tables[0].findall('w:tr', NS)
+    assert len(rows) == 90
+    assert all(r.find('w:trPr/w:cantSplit', NS) is not None for r in rows)
+    borders = listing_tables[0].find('w:tblPr/w:tblBorders', NS)
+    assert borders.find('w:insideH', NS).get(tag('val')) == 'nil'
+    assert borders.find('w:top', NS).get(tag('val')) == 'single'
     values = [text(p) for p in root.findall('.//w:p', NS)]
-    assert 'Продолжение листинга А.1 – Проверочный модуль' in values
-    assert 'Окончание листинга А.1 – Проверочный модуль' in values
+    assert 'Листинг А.1 — Проверочный модуль' in values
+    assert not any(v.startswith(('Продолжение листинга', 'Окончание')) for v in values)
     assert len(root.findall('.//w:tblHeader', NS)) == 6
+    styles = read_part(converted, 'word/styles.xml')
+    caption = styles.find("w:style[@w:styleId='GOSTListingCaption']", NS)
+    # Like table captions, by agreement: right after the text, no forced page.
+    assert caption.find('w:pPr/w:pageBreakBefore', NS).get(tag('val')) == '0'
+    assert caption.find('w:pPr/w:keepNext', NS).get(tag('val')) == '1'
+
+
+def test_listing_line_numbers_step_ten(tmp_path):
+    """Rules 8.3: referenced lines are numbered 10, 20, …"""
+    output = build(tmp_path, '## Раздел\n\n```{.numberLines}\nЛистинг 1.1 - Пример\na = 1\nb = 2\n```\n')
+    values = [text(p) for p in read_part(output, 'word/document.xml').findall('.//w:p', NS)]
+    assert 'Листинг 1.1 — Пример' in values
+    assert ['10  a = 1', '20  b = 2'] == [v for v in values if v[:2] in ('10', '20')]
 
 
 def test_table_header_centered_and_other_cells_left_aligned(converted):
@@ -139,8 +166,9 @@ def test_table_header_centered_and_other_cells_left_aligned(converted):
     assert len(tables) == 6
     for table in tables:
         for index, row in enumerate(table.findall('w:tr', NS)):
-            for p in row.findall('.//w:p', NS):
-                assert p.find('w:pPr/w:jc', NS).get(tag('val')) == ('center' if index == 0 else 'left')
+            for col, cell in enumerate(row.findall('w:tc', NS)):
+                for p in cell.findall('.//w:p', NS):
+                    assert p.find('w:pPr/w:jc', NS).get(tag('val')) == ('center' if index == 0 else 'left' if col == 0 else 'both')
 
 
 def test_table_alignment_overrides_markdown_columns(tmp_path):
@@ -150,9 +178,9 @@ def test_table_alignment_overrides_markdown_columns(tmp_path):
     output = tmp_path / 'alignment.docx'
     convert(source, output, options=ConvertOptions(toc=False, title_page=False))
     rows = read_part(output, 'word/document.xml').findall('.//w:tbl/w:tr', NS)
-    for row, expected in zip(rows, ['center', 'left'], strict=True):
+    for row, expected in zip(rows, [['center'] * 3, ['left', 'both', 'both']], strict=True):
         assert [p.find('w:pPr/w:jc', NS).get(tag('val'))
-                for p in row.findall('.//w:p', NS)] == [expected] * 3
+                for p in row.findall('.//w:p', NS)] == expected
 
 
 def test_custom_reference_layout_is_preserved(tmp_path):
@@ -187,18 +215,28 @@ def test_cli_page_start_and_negative_value(tmp_path):
 
 
 def test_appendix_subsections_and_grouped_refs(tmp_path):
+    """Rules 10.4: appendix sections «Приложение А.1»; deeper items «А.1.1»."""
     source = tmp_path / 'appendix.md'
-    source.write_text('## Раздел\n\n# Приложение А\n\n## Подраздел\n\n'
+    source.write_text('## Раздел\n\nСм. Приложение А и Приложение Б.\n\n# Приложения\n\n'
+                      '# Приложение А. Исходные данные\n\n## Подраздел\n\n'
                       '### Пункт\n\n: Данные {#tbl:a}\n\n| X |\n|---|\n| 1 |\n\n'
                       '$$ a=b $$ {#eq:a}\n\nСм. [@tbl:a; @eq:a].\n\n'
-                      '# Приложение Б\n\n## Подраздел\n', encoding='utf-8')
+                      '# Приложение Б — Расчёты\n\n## Подраздел\n', encoding='utf-8')
     out = tmp_path / 'appendix.docx'
     convert(source, out, options=ConvertOptions(toc=False, title_page=False))
-    actual = text(read_part(out, 'word/document.xml'))
-    assert 'А.1 Подраздел' in actual
-    assert 'А.1.1 Пункт' in actual
-    assert 'Б.1 Подраздел' in actual
-    assert 'См. А.1; (А.1).' in actual
+    paras = read_part(out, 'word/document.xml').findall('.//w:body/w:p', NS)
+    styled = [(text(p), p.find('w:pPr/w:pStyle', NS).get(tag('val')) if p.find('w:pPr/w:pStyle', NS) is not None else '')
+              for p in paras]
+    values = [value for value, _ in styled]
+    # Rules 10.3: the first sheet of «Приложения» lists the appendices.
+    start = values.index('ПРИЛОЖЕНИЯ')
+    assert values[start + 1:start + 3] == ['Приложение А — Исходные данные', 'Приложение Б — Расчёты']
+    assert ('Приложение А', 'GOSTAppendixHeading') in styled
+    assert ('Исходные данные', 'GOSTAppendixTitle') in styled
+    assert ('Приложение А.1', 'GOSTAppendixSection') in styled
+    assert ('Приложение Б.1', 'GOSTAppendixSection') in styled
+    assert 'А.1.1 Пункт' in values
+    assert 'См. А.1; (А.1).' in values
 
 
 def test_template_itself_matches_sample():
@@ -297,16 +335,29 @@ def test_author_column_widths_are_kept(tmp_path):
 
 
 def test_fixture_table_widths_follow_section(converted):
-    """B1: portrait tables fill 9638 twips, the landscape table 14570; listings are untouched."""
+    """6.4: tables fit their content within the section's text width; listings are untouched."""
     root = read_part(converted, 'word/document.xml')
     tables = [t for t in root.findall('.//w:tbl', NS)
               if t.find('w:tr/w:trPr/w:tblHeader', NS) is not None]
     sums = [sum(grid(t)) for t in tables]
-    assert sums == [9638, 9638, 9638, 9638, 9638, 14570]
+    assert len(sums) == 6
+    assert all(s <= 9638 for s in sums[:5]) and sums[5] <= 14570
+    for table, total in zip(tables, sums):
+        assert int(table.find('w:tblPr/w:tblW', NS).get(tag('w'))) == total
+        assert table.find('w:tblPr/w:jc', NS).get(tag('val')) == 'center'
     notation = next(t for t in tables if text(t).startswith('Обозначение'))
+    assert sum(grid(notation)) == 9638
     assert grid(notation)[0] * 2 < grid(notation)[1]
     listings = [t for t in root.findall('.//w:tbl', NS) if t not in tables]
-    assert all(t.find('w:tblPr/w:tblLayout', NS) is None for t in listings)
+    assert all(t.find('w:tblPr/w:tblLayout', NS).get(tag('type')) == 'fixed' for t in listings)
+
+
+def test_short_table_is_not_stretched(tmp_path):
+    """6.4: «Автоподбор по содержимому» leaves a short table narrower than the text."""
+    output = build(tmp_path, '## Раздел\n\n| Код | Значение |\n|---|---|\n| A | 1 |\n')
+    table = read_part(output, 'word/document.xml').find('.//w:tbl', NS)
+    assert sum(grid(table)) < 9638 / 2
+    assert grid(table)[0] >= text_width('Код', bold=True) + 2 * CELL_MARGIN_X
 
 
 def test_table_cell_margins(converted):
@@ -321,16 +372,17 @@ def test_table_cell_margins(converted):
                               'left': CELL_MARGIN_X, 'right': CELL_MARGIN_X}
             assert CELL_MARGIN_Y == 57 and CELL_MARGIN_X == 108
         else:
-            assert values == {'top': 40, 'bottom': 40, 'left': 80, 'right': 80}
+            assert values == {'top': 0, 'bottom': 0, 'left': 80, 'right': 80}
 
 
 def test_free_line_around_equations(converted):
     """B3: one body line (spacing, not empty paragraphs) above and below a formula."""
-    assert EQUATION_SPACING == 480
+    # 14 pt × 1.15 × 1.5: one empty body line in Word and LibreOffice.
+    assert EQUATION_SPACING == 483
     body = read_part(converted, 'word/document.xml').find('w:body', NS)
     blocks = [el for el in body if el.tag in (tag('p'), tag('tbl'))]
-    numbered = [p for p in blocks if text(p) in ['(2.1)', '(А.1)']]
-    assert len(numbered) == 2
+    numbered = [p for p in blocks if text(p) in ['(2.1)']]
+    assert len(numbered) == 1
     for p in numbered:
         spacing = p.find('w:pPr/w:spacing', NS)
         assert spacing.get(tag('before')) == spacing.get(tag('after')) == str(EQUATION_SPACING)
@@ -342,22 +394,23 @@ def test_free_line_around_equations(converted):
 def test_where_lines_after_equation(tmp_path):
     """B4: «где» after a labelled formula splits into Where paragraphs without indent."""
     output = build(tmp_path, '## Раздел\n\n$$\nx = y\n$$ {#eq:a}\n\n'
-                   'где $x$ – первое;\n$y$ – второе.\n\n'
+                   'где $x$ — первое;\n$y$ — второе.\n\n'
                    'где это обычный абзац.\n\n'
-                   '$$\nz = 1\n$$ {#eq:b}\n\nЗдесь $z$ – не расшифровка.\n\n'
-                   '$$\nw = 2\n$$\n\nгде $w$ – формула без номера.\n')
+                   '$$\nz = 1\n$$ {#eq:b}\n\nЗдесь $z$ — не расшифровка.\n\n'
+                   '$$\nw = 2\n$$\n\nгде $w$ — формула без номера.\n')
     paras = read_part(output, 'word/document.xml').findall('.//w:body/w:p', NS)
     def style(p):
         sid = p.find('w:pPr/w:pStyle', NS)
         return sid.get(tag('val')) if sid is not None else ''
-    where = [''.join(p.itertext()) for p in paras if style(p) == 'Where']
-    assert where == ['где x – первое;', 'y – второе.']
-    others = [''.join(p.itertext()) for p in paras if style(p) != 'Where']
+    where = [tabbed(p) for p in paras if style(p) == 'Where']
+    # Rules 5.8: «где» without indent, every symbol at the same tab stop.
+    assert where == ['где\tx — первое;', '\ty — второе.', 'где\tw — формула без номера.']
+    others = [tabbed(p) for p in paras if style(p) != 'Where']
     assert 'где это обычный абзац.' in others
-    assert 'где w – формула без номера.' in others
     styles = read_part(output, 'word/styles.xml')
     s = styles.find("w:style[@w:styleId='Where']", NS)
     assert s.find('w:pPr/w:ind', NS).get(tag('firstLine')) == '0'
+    assert s.find('w:pPr/w:tabs/w:tab', NS).get(tag('pos')) == '709'
     assert s.find('w:pPr/w:jc', NS).get(tag('val')) == 'both'
     spacing = s.find('w:pPr/w:spacing', NS)
     assert (spacing.get(tag('before')), spacing.get(tag('after')), spacing.get(tag('line'))) == ('0', '0', '360')
@@ -368,9 +421,12 @@ def test_fixture_where_paragraph(converted):
     body = read_part(converted, 'word/document.xml').find('w:body', NS)
     where = [p for p in body.findall('w:p', NS)
              if p.find("w:pPr/w:pStyle[@w:val='Where']", NS) is not None]
-    assert [''.join(p.itertext()) for p in where] == [
-        'где a — число успешных операций;', 'b — общее число операций.',
-        'где c — итоговое значение.']
+    assert [tabbed(p) for p in where] == [
+        'где\ta — число успешных операций;', '\tb — общее число операций.',
+        'где\tc — итоговое значение.']
+    # The formula is kept on the page of its explanation.
+    formula = body[list(body).index(where[0]) - 1]
+    assert formula.find('w:pPr/w:keepNext', NS).get(tag('val')) == '1'
 
 
 def test_references_render_number_only(tmp_path):
@@ -381,3 +437,131 @@ def test_references_render_number_only(tmp_path):
     actual = text(read_part(output, 'word/document.xml'))
     assert 'На Рисунке 1.1 показано, в Таблице 1.1 приведено, по формуле (1.1) считается.' in actual
     assert 'рис.' not in actual and 'табл.' not in actual
+
+
+def test_explicit_table_continuations(tmp_path):
+    output = build(tmp_path, '## Раздел\n\n: Проверка {#tbl:test break-after="2,3"}\n\n'
+                   '| Имя | Значение |\n|---|---|\n| A | 1 |\n| B | 2 |\n| C | 3 |\n| D | 4 |\n')
+    body = read_part(output, 'word/document.xml').find('w:body', NS)
+    tables = body.findall('w:tbl', NS)
+    assert [len(t.findall('w:tr', NS)) for t in tables] == [3, 2, 2]
+    assert [text(t) for t in tables] == ['ИмяЗначениеA1B2', 'ИмяЗначениеC3', 'ИмяЗначениеD4']
+    continuations = [p for p in body.findall('w:p', NS) if text(p) == 'Продолжение Таблицы 1.1']
+    assert len(continuations) == 2
+    assert all(p.find('w:pPr/w:pageBreakBefore', NS).get(tag('val')) == '1' for p in continuations)
+    for table in tables[:-1]:
+        cells = table.findall('w:tr', NS)[-1].findall('w:tc', NS)
+        assert all(c.find('w:tcPr/w:tcBorders/w:bottom', NS).get(tag('val')) == 'nil' for c in cells)
+    assert 'GOSTTableBreaks' not in ET.tostring(body, encoding='unicode')
+
+
+def test_only_referenced_formulas_numbered(tmp_path):
+    output = build(tmp_path, '## Раздел\n\n$$ a=b $$ {#eq:unused}\n\n'
+                   '$$ c=d $$ {#eq:used}\n\nПо формуле @eq:used.\n\n$$ e=f $$\n')
+    root = read_part(output, 'word/document.xml')
+    assert '(1.1)' in text(root) and '(1.2)' not in text(root)
+    assert 'eq:unused' not in text(root)
+    formulas = [p for p in root.findall('.//w:body/w:p', NS) if p.find('.//m:oMath', NS) is not None]
+    assert len(formulas) == 3
+    for p in formulas:
+        spacing = p.find('w:pPr/w:spacing', NS)
+        assert spacing.get(tag('before')) == spacing.get(tag('after')) == str(EQUATION_SPACING)
+
+
+def test_rules_toc_lists_and_hyphenation(converted):
+    styles = read_part(converted, 'word/styles.xml')
+    by_name = {s.find('w:name', NS).get(tag('val')).lower(): s for s in styles.findall('w:style', NS)}
+    for level in range(1, 4):
+        s = by_name[f'toc {level}']
+        assert s.find('w:rPr/w:sz', NS).get(tag('val')) == '28'
+        assert s.find('w:pPr/w:spacing', NS).get(tag('line')) == '360'
+        assert s.find('w:pPr/w:ind', NS).get(tag('firstLine')) == '0'
+    for name in ['normal', 'heading 2', 'heading 3']:
+        assert by_name[name].find('w:pPr/w:widowControl', NS).get(tag('val')) == '1'
+    settings = read_part(converted, 'word/settings.xml')
+    assert settings.find('w:autoHyphenation', NS).get(tag('val')) == 'false'
+    numbering = read_part(converted, 'word/numbering.xml')
+    for level in numbering.findall('.//w:lvl', NS):
+        depth = int(level.get(tag('ilvl')))
+        ind = level.find('w:pPr/w:ind', NS)
+        assert int(ind.get(tag('left'))) == 1276 + depth * 567
+        assert ind.get(tag('hanging')) == '567'
+    title = by_name['appendix title']
+    assert title.find('w:rPr/w:b', NS).get(tag('val')) == '0'
+    assert title.find('w:pPr/w:spacing', NS).get(tag('after')) == '0'
+
+
+def test_images_fit_page_without_distortion():
+    from md2gost.formatting import fit_figures
+    wp = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+    a = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+    root = ET.Element(tag('document'))
+    body = ET.SubElement(root, tag('body'))
+    p = ET.SubElement(body, tag('p'))
+    inline = ET.SubElement(ET.SubElement(ET.SubElement(p, tag('r')), tag('drawing')), '{'+wp+'}inline')
+    extent = ET.SubElement(inline, '{'+wp+'}extent', cx='4000000', cy='10000000')
+    shape = ET.SubElement(ET.SubElement(inline, '{'+a+'}xfrm'), '{'+a+'}ext', cx='4000000', cy='10000000')
+    ET.SubElement(body, tag('sectPr'))
+    fit_figures(root)
+    assert int(extent.get('cy')) == 19 * 360000
+    assert int(extent.get('cx')) / int(extent.get('cy')) == .4
+    assert shape.attrib == extent.attrib
+
+
+def test_hyperlinks_are_black(converted):
+    styles = read_part(converted, 'word/styles.xml')
+    link = next(s for s in styles.findall('w:style', NS)
+                if s.find('w:name', NS).get(tag('val')).lower() == 'hyperlink')
+    color = link.find('w:rPr/w:color', NS)
+    assert color.attrib == {tag('val'): '000000'}
+    assert link.find('w:rPr/w:u', NS).get(tag('val')) == 'none'
+
+
+def test_properties_follow_schema_order(converted):
+    """Word drops properties out of schema sequence; LibreOffice hides the problem."""
+    from md2gost.formatting import SCHEMA_ORDER, W, _SAME_RANK
+    with zipfile.ZipFile(converted) as package:
+        parts = [n for n in package.namelist() if n.startswith('word/') and n.endswith('.xml')]
+        for name in parts:
+            for el in ET.fromstring(package.read(name)).iter():
+                local = el.tag.rpartition('}')[2]
+                order = SCHEMA_ORDER.get(local)
+                if order is None or not el.tag.startswith(f'{{{W}}}'):
+                    continue
+                ranks = [order.index(_SAME_RANK.get(c.tag.rpartition('}')[2], c.tag.rpartition('}')[2]))
+                         for c in el if c.tag.startswith(f'{{{W}}}')
+                         and _SAME_RANK.get(c.tag.rpartition('}')[2], c.tag.rpartition('}')[2]) in order]
+                assert ranks == sorted(ranks), (name, local, [c.tag for c in el])
+
+
+def test_first_level_headings_are_all_caps(converted):
+    """Table 2.1: «Видоизменение: все прописные» for chapters and structural parts."""
+    styles = read_part(converted, 'word/styles.xml')
+    by_name = {s.find('w:name', NS).get(tag('val')).lower(): s for s in styles.findall('w:style', NS)}
+    for name in ['heading 1', 'structural heading', 'toc heading']:
+        assert by_name[name].find('w:rPr/w:caps', NS).get(tag('val')) == '1'
+    for name in ['heading 2', 'appendix heading', 'appendix title']:
+        assert by_name[name].find('w:rPr/w:caps', NS) is None
+
+
+def test_quotes_follow_the_language(tmp_path):
+    """Rules 1.10: «…» in Russian, “…” in English."""
+    output = build(tmp_path, '## Раздел\n\nСтандарт "Правила \'внутри\' текста" и "plain English".\n')
+    assert 'Стандарт «Правила „внутри“ текста» и “plain English”.' in \
+        [text(p) for p in read_part(output, 'word/document.xml').findall('.//w:p', NS)]
+
+
+def test_bibliography_rubrics(tmp_path):
+    """Table 9.1: rubrics inside the list of sources are unnumbered and outside the TOC."""
+    output = build(tmp_path, '## Раздел\n\nТекст.\n\n# Список использованных источников\n\n'
+                   '## Нормативные документы\n\n1. Закон.\n\n## Книги\n\n2. Книга.\n\n## Следующий\n')
+    paras = read_part(output, 'word/document.xml').findall('.//w:body/w:p', NS)
+    styled = {text(p): p.find('w:pPr/w:pStyle', NS).get(tag('val')) for p in paras
+              if p.find('w:pPr/w:pStyle', NS) is not None}
+    assert styled['Нормативные документы'] == 'GOSTBibliographyHeading'
+    assert styled['Книги'] == 'GOSTBibliographyHeading'
+    style = read_part(output, 'word/styles.xml').find("w:style[@w:styleId='GOSTBibliographyHeading']", NS)
+    assert style.find('w:rPr/w:b', NS).get(tag('val')) == '0'
+    assert style.find('w:rPr/w:caps', NS).get(tag('val')) == '1'
+    assert style.find('w:pPr/w:ind', NS).get(tag('left')) == '709'
+    assert style.find('w:pPr/w:jc', NS).get(tag('val')) == 'center'

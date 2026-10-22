@@ -15,14 +15,22 @@ local function equation_label(el)
   end
 end
 
--- The paragraph right after a numbered formula that starts with «где» lists one
--- symbol per source line. Each line becomes a paragraph in the Where style.
+-- The paragraph right after a formula that starts with «где» lists one symbol
+-- per source line. Each line becomes a paragraph in the Where style; a tab
+-- puts every symbol at the style's tab stop, one under another (rules 5.8).
+local TAB = pandoc.RawInline('openxml', '<w:r><w:tab/></w:r>')
+
+local function is_display(el)
+  return el and el.t == 'Para' and el.content[1] and el.content[1].t == 'Math'
+    and el.content[1].mathtype == 'DisplayMath'
+end
+
 local function split_where(blocks)
   local result = pandoc.Blocks({})
   local previous = nil
   for _, block in ipairs(blocks) do
     local first = block.t == 'Para' and block.content[1] or nil
-    if previous and equation_label(previous) and first and first.t == 'Str'
+    if is_display(previous) and first and first.t == 'Str'
         and pandoc.text.lower(first.text):match('^где[,:]?$') then
       local lines = {pandoc.Inlines({})}
       for _, inline in ipairs(block.content) do
@@ -30,10 +38,20 @@ local function split_where(blocks)
         else lines[#lines]:insert(inline) end
       end
       local paras = pandoc.Blocks({})
-      for _, line in ipairs(lines) do
+      for i, line in ipairs(lines) do
         while #line > 0 and line[1].t == 'Space' do line:remove(1) end
         while #line > 0 and line[#line].t == 'Space' do line:remove(#line) end
-        if #line > 0 then paras:insert(pandoc.Para(line)) end
+        if #line > 0 then
+          if i == 1 then
+            -- «где» without a colon (5.8), then the tab instead of a space.
+            line[1] = pandoc.Str('где')
+            if line[2] and line[2].t == 'Space' then line:remove(2) end
+            line:insert(2, TAB)
+          else
+            line:insert(1, TAB)
+          end
+          paras:insert(pandoc.Para(line))
+        end
       end
       result:insert(pandoc.Div(paras, pandoc.Attr('', {}, {{'custom-style', 'Where'}})))
     else
@@ -45,6 +63,10 @@ local function split_where(blocks)
 end
 
 function Pandoc(doc)
+  local referenced = {}
+  doc:walk { Cite = function(el)
+    for _, cit in ipairs(el.citations) do referenced[cit.id] = true end
+  end }
   doc = doc:walk { Blocks = split_where }
   local section = ''
   local counts = {fig = 0, tbl = 0, eq = 0}
@@ -70,7 +92,7 @@ function Pandoc(doc)
     Figure = function(el)
       if #el.caption.long == 0 then return el end
       local number = next_number('fig', el.identifier)
-      caption_with_prefix(el.caption, 'Рисунок ' .. number .. ' –')
+      caption_with_prefix(el.caption, 'Рисунок ' .. number .. ' —')
       -- Keep bookmarks but stop pandoc-crossref from adding its own number.
       if el.identifier:match('^fig:') then el.identifier = 'gost-' .. el.identifier end
       return el
@@ -78,16 +100,23 @@ function Pandoc(doc)
     Table = function(el)
       if #el.caption.long == 0 then return el end
       local number = next_number('tbl', el.identifier)
-      caption_with_prefix(el.caption, 'Таблица ' .. number .. ' –')
+      caption_with_prefix(el.caption, 'Таблица ' .. number .. ' —')
       if el.identifier:match('^tbl:') then el.identifier = 'gost-' .. el.identifier end
+      local breaks = el.attributes['break-after']
+      if breaks then
+        if not breaks:match('^%d+[, %d]*$') then error('break-after: ожидаются номера строк') end
+        return {pandoc.RawBlock('openxml', '<w:p><w:pPr><w:pStyle w:val="GOSTTableBreaks"/></w:pPr><w:r><w:t>' .. breaks .. '</w:t></w:r></w:p>'), el}
+      end
       return el
     end,
     Para = function(el)
       local id = equation_label(el)
       if id then
-        local number = next_number('eq', id)
         local math = el.content[1]
-        math.text = math.text .. '\\qquad{(' .. number .. ')}'
+        if referenced[id] then
+          local number = next_number('eq', id)
+          math.text = math.text .. '\\qquad{(' .. number .. ')}'
+        end
         el.content = pandoc.Inlines({math})
       end
       return el

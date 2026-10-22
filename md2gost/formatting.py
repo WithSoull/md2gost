@@ -1,4 +1,4 @@
-"""OOXML layout rules extracted from the Olenin diploma sample.
+"""OOXML layout rules from ПРАВИЛА_ОФОРМЛЕНИЯ.docx.
 
 Only the bundled template gets this layout; user reference documents keep theirs.
 Uses the standard library so installed CLI dependencies remain unchanged.
@@ -16,9 +16,12 @@ W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 M = 'http://schemas.openxmlformats.org/officeDocument/2006/math'
 NS = {'w': W, 'm': M}
 
-# One free line of body text (14 pt, 1.5 spacing) above and below a formula,
-# ГОСТ 7.32-2017, 6.8.1. Spacing, not empty paragraphs.
-EQUATION_SPACING = 480
+# One empty line of body text above and below a formula (rules 5.2): Times New
+# Roman 14 pt at 1.5 spacing advances 14 × 1.15 × 1.5 = 24.15 pt in Word and
+# LibreOffice. Spacing, not empty paragraphs.
+EQUATION_SPACING = 483
+# «где» lines: symbols start at the body indent, one under another (rules 5.8).
+WHERE_TAB = 709
 # Cell padding: about 1 mm above and below; Word's default 0.19 cm at the sides.
 CELL_MARGIN_Y = 57
 CELL_MARGIN_X = 108
@@ -26,6 +29,87 @@ CELL_MARGIN_X = 108
 TBLPR_ORDER = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual', 'tblStyleRowBandSize',
                'tblStyleColBandSize', 'tblW', 'jc', 'tblCellSpacing', 'tblInd', 'tblBorders',
                'shd', 'tblLayout', 'tblCellMar', 'tblLook', 'tblCaption', 'tblDescription']
+_MARGINS = ['top', 'start', 'left', 'bottom', 'end', 'right', 'insideH', 'insideV', 'tl2br', 'tr2bl']
+# Child order of the ECMA-376 complex types this module edits. LibreOffice reads
+# properties in any order, Word ignores or rejects those out of sequence.
+SCHEMA_ORDER = {
+    'style': ['name', 'aliases', 'basedOn', 'next', 'link', 'autoRedefine', 'hidden',
+              'uiPriority', 'semiHidden', 'unhideWhenUsed', 'qFormat', 'locked', 'personal',
+              'personalCompose', 'personalReply', 'rsid', 'pPr', 'rPr', 'tblPr', 'trPr',
+              'tcPr', 'tblStylePr'],
+    'pPr': ['pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'framePr', 'widowControl',
+            'numPr', 'suppressLineNumbers', 'pBdr', 'shd', 'tabs', 'suppressAutoHyphens',
+            'kinsoku', 'wordWrap', 'overflowPunct', 'topLinePunct', 'autoSpaceDE',
+            'autoSpaceDN', 'bidi', 'adjustRightInd', 'snapToGrid', 'spacing', 'ind',
+            'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc', 'textDirection',
+            'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr',
+            'sectPr', 'pPrChange'],
+    'rPr': ['ins', 'del', 'moveFrom', 'moveTo', 'rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs',
+            'caps', 'smallCaps', 'strike', 'dstrike', 'outline', 'shadow', 'emboss', 'imprint',
+            'noProof', 'snapToGrid', 'vanish', 'webHidden', 'color', 'spacing', 'w', 'kern',
+            'position', 'sz', 'szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText',
+            'vertAlign', 'rtl', 'cs', 'em', 'lang', 'eastAsianLayout', 'specVanish', 'oMath',
+            'rPrChange'],
+    'tblPr': TBLPR_ORDER,
+    'tcPr': ['cnfStyle', 'tcW', 'gridSpan', 'hMerge', 'vMerge', 'tcBorders', 'shd', 'noWrap',
+             'tcMar', 'textDirection', 'tcFitText', 'vAlign', 'hideMark', 'headers', 'cellIns',
+             'cellDel', 'cellMerge', 'tcPrChange'],
+    'sectPr': ['headerReference', 'footerReference', 'footnotePr', 'endnotePr', 'type', 'pgSz',
+               'pgMar', 'paperSrc', 'pgBorders', 'lnNumType', 'pgNumType', 'cols', 'formProt',
+               'vAlign', 'noEndnote', 'titlePg', 'textDirection', 'bidi', 'rtlGutter',
+               'docGrid', 'printerSettings', 'sectPrChange'],
+    'tblBorders': _MARGINS, 'tcBorders': _MARGINS, 'tblCellMar': _MARGINS, 'tcMar': _MARGINS,
+    'lvl': ['start', 'numFmt', 'lvlRestart', 'pStyle', 'isLgl', 'suff', 'lvlText',
+            'lvlPicBulletId', 'legacy', 'lvlJc', 'pPr', 'rPr'],
+    'docDefaults': ['rPrDefault', 'pPrDefault'],
+    'settings': ['writeProtection', 'view', 'zoom', 'removePersonalInformation',
+                 'removeDateAndTime', 'doNotDisplayPageBoundaries', 'displayBackgroundShape',
+                 'printPostScriptOverText', 'printFractionalCharacterWidth', 'printFormsData',
+                 'embedTrueTypeFonts', 'embedSystemFonts', 'saveSubsetFonts', 'saveFormsData',
+                 'mirrorMargins', 'alignBordersAndEdges', 'bordersDoNotSurroundHeader',
+                 'bordersDoNotSurroundFooter', 'gutterAtTop', 'hideSpellingErrors',
+                 'hideGrammaticalErrors', 'activeWritingStyle', 'proofState', 'formsDesign',
+                 'attachedTemplate', 'linkStyles', 'stylePaneFormatFilter',
+                 'stylePaneSortMethod', 'documentType', 'mailMerge', 'revisionView',
+                 'trackRevisions', 'doNotTrackMoves', 'doNotTrackFormatting',
+                 'documentProtection', 'autoFormatOverride', 'styleLockTheme',
+                 'styleLockQFSet', 'defaultTabStop', 'autoHyphenation',
+                 'consecutiveHyphenLimit', 'hyphenationZone', 'doNotHyphenateCaps',
+                 'showEnvelope', 'summaryLength', 'clickAndTypeStyle', 'defaultTableStyle',
+                 'evenAndOddHeaders', 'bookFoldRevPrinting', 'bookFoldPrinting',
+                 'bookFoldPrintingSheets', 'drawingGridHorizontalSpacing',
+                 'drawingGridVerticalSpacing', 'displayHorizontalDrawingGridEvery',
+                 'displayVerticalDrawingGridEvery', 'doNotUseMarginsForDrawingGridOrigin',
+                 'drawingGridHorizontalOrigin', 'drawingGridVerticalOrigin',
+                 'doNotShadeFormData', 'noPunctuationKerning', 'characterSpacingControl',
+                 'printTwoOnOne', 'strictFirstAndLastChars', 'noLineBreaksAfter',
+                 'noLineBreaksBefore', 'savePreviewPicture', 'doNotValidateAgainstSchema',
+                 'saveInvalidXml', 'ignoreMixedContent', 'alwaysShowPlaceholderText',
+                 'doNotDemarcateInvalidXml', 'saveXmlDataOnly', 'useXSLTWhenSaving',
+                 'saveThroughXslt', 'showXMLTags', 'alwaysMergeEmptyNamespace', 'updateFields',
+                 'hdrShapeDefaults', 'footnotePr', 'endnotePr', 'compat', 'docVars', 'rsids',
+                 'mathPr', 'attachedSchema', 'themeFontLang', 'clrSchemeMapping',
+                 'doNotIncludeSubdocsInStats', 'doNotAutoCompressPictures', 'forceUpgrade',
+                 'captions', 'readModeInkLockDown', 'smartTagType', 'schemaLibrary',
+                 'shapeDefaults', 'doNotEmbedSmartTags', 'decimalSymbol', 'listSeparator'],
+}
+# Choice groups: members share a position and keep their relative order.
+_SAME_RANK = {'footerReference': 'headerReference', 'left': 'start', 'right': 'end'}
+
+
+def normalize_order(root: ET.Element) -> None:
+    """Sort children of known WordprocessingML types into schema order."""
+    for el in root.iter():
+        name = el.tag.rpartition('}')[2]
+        order = SCHEMA_ORDER.get(name)
+        if order is None or not el.tag.startswith(f'{{{W}}}') or len(el) < 2:
+            continue
+        def rank(item: ET.Element) -> int:
+            local = item.tag.rpartition('}')[2]
+            local = _SAME_RANK.get(local, local)
+            # Foreign extensions go last, where the schema allows them.
+            return order.index(local) if item.tag.startswith(f'{{{W}}}') and local in order else len(order)
+        el[:] = sorted(el, key=rank)
 
 
 def tag(name: str) -> str:
@@ -62,6 +146,7 @@ def parse(data: bytes) -> ET.Element:
 
 
 def serialize(root: ET.Element, original: bytes) -> bytes:
+    normalize_order(root)
     result = ET.tostring(root, encoding='unicode')
     # Keep declarations referenced by mc:Ignorable even if no element uses them.
     opening = original.decode('utf-8').split('>', 2)
@@ -81,14 +166,19 @@ def rewrite_package(path: Path, updates: dict[str, bytes]) -> None:
 
 
 def font(rpr: ET.Element, size: int = 28, *, bold: bool = False,
-         italic: bool = False, name: str = 'Times New Roman') -> None:
+         italic: bool = False, name: str = 'Times New Roman', caps: bool = False) -> None:
     remove(rpr, 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'color', 'sz', 'szCs')
-    child(rpr, 'rFonts', ascii=name, hAnsi=name, cs=name)
+    child(rpr, 'rFonts', ascii=name, hAnsi=name, cs=name, eastAsia=name)
     child(rpr, 'sz', val=size)
     child(rpr, 'szCs', val=size)
     child(rpr, 'color', val='000000')
     child(rpr, 'b', val='1' if bold else '0')
+    child(rpr, 'bCs', val='1' if bold else '0')
     child(rpr, 'i', val='1' if italic else '0')
+    child(rpr, 'iCs', val='1' if italic else '0')
+    # «Видоизменение: все прописные» is a font effect, not only uppercase text.
+    if caps:
+        child(rpr, 'caps', val='1')
 
 
 def paragraph(ppr: ET.Element, *, line: int = 360, first: int = 709,
@@ -101,6 +191,10 @@ def paragraph(ppr: ET.Element, *, line: int = 360, first: int = 709,
     child(ppr, 'jc', val=align)
     child(ppr, 'keepNext', val='1' if keep else '0')
     child(ppr, 'pageBreakBefore', val='1' if page else '0')
+    child(ppr, 'widowControl', val='1')
+    child(ppr, 'suppressAutoHyphens', val='1')
+    if keep:
+        child(ppr, 'keepLines', val='1')
 
 
 def configure_styles(root: ET.Element) -> dict[str, str]:
@@ -120,47 +214,71 @@ def configure_styles(root: ET.Element) -> dict[str, str]:
         size = params.pop('size', 28)
         bold = params.pop('bold', False)
         italic = params.pop('italic', False)
+        caps = params.pop('caps', False)
         fname = params.pop('font_name', 'Times New Roman')
         paragraph(properties(style, 'pPr'), **params)
-        font(properties(style, 'rPr'), size, bold=bold, italic=italic, name=fname)
+        font(properties(style, 'rPr'), size, bold=bold, italic=italic, name=fname, caps=caps)
         return style
     for name in ['Normal', 'Body Text', 'First Paragraph', 'Compact', 'List Paragraph', 'Bibliography']:
         style = configure(name)
         child(properties(style, 'pPr'), 'suppressAutoHyphens', val='1')
+    # Table 2.1: chapters 18 pt caps from a new page, sections 16 pt, items 14 pt.
     for level, size in [(1, 36), (2, 32), (3, 28), (4, 28), (5, 28), (6, 28)]:
-        style = configure(f'heading {level}', size=size, bold=True,
+        style = configure(f'heading {level}', size=size, bold=True, caps=level == 1,
                           before=0 if level == 1 else 480, after=240,
                           keep=True, page=level == 1)
         child(properties(style, 'pPr'), 'outlineLvl', val=level - 1)
+    # 2.6.7: unnumbered parts use the first-level heading, centered (no indent).
+    # 10.7: «Приложение А» as a third-level heading from a new page, its title
+    # in body text; sections «Приложение А.1» (10.4) continue on the same page.
     for name, sid, size, outline in [
         ('Structural Heading', 'GOSTStructuralHeading', 36, 0),
         ('Annotation Heading', 'GOSTAnnotationHeading', 36, 9),
         ('Appendix Heading', 'GOSTAppendixHeading', 28, 0),
+        ('Appendix Section', 'GOSTAppendixSection', 28, 9),
         ('Appendix Title', 'GOSTAppendixTitle', 28, 9),
         ('TOC Heading', None, 36, 9),
     ]:
-        style = configure(name, sid, size=size, bold=True, first=0, align='center',
-                          after=240, keep=True, page=name != 'Appendix Title')
+        appendix = name.startswith('Appendix')
+        style = configure(name, sid, size=size, bold=name != 'Appendix Title',
+                          caps=not appendix, first=0, align='center',
+                          after=0 if appendix else 240, keep=True,
+                          page=name in ('Structural Heading', 'Annotation Heading',
+                                        'Appendix Heading', 'TOC Heading'))
         child(properties(style, 'pPr'), 'outlineLvl', val=outline)
+    # Table 9.1: rubrics inside the list of sources.
+    configure('Bibliography Heading', 'GOSTBibliographyHeading', caps=True, first=0,
+              align='center', before=120, after=120, keep=True)
+    child(properties(styles['bibliography heading'], 'pPr'), 'ind', left=709, right=0, firstLine=0)
     configure('Table Caption', size=24, italic=True, line=240, first=0,
-              align='left', before=120, after=120, keep=True)
+              align='both', before=120, after=0, keep=True)
     configure('Image Caption', size=24, bold=True, line=240, first=0,
               align='center', after=120)
-    # Lines of the «где» explanation after a formula (gost-tables.lua).
-    configure('Where', line=360, first=0, align='both', before=0, after=0)
+    # Lines of the «где» explanation after a formula (gost-tables.lua): «где»,
+    # then a tab, so that every symbol starts at WHERE_TAB.
+    where = configure('Where', line=360, first=0, align='both', before=0, after=0)
+    child(child(properties(where, 'pPr'), 'tabs'), 'tab', val='left', pos=WHERE_TAB)
     configure('Figure', line=240, first=0, align='center', keep=True)
     configure('Captioned Figure', line=240, first=0, align='center', keep=True)
+    # Table 8.1 asks for a new page like table captions; the rules' own example
+    # (Приложение А.3) and 1.7 keep listings right after the text.
     configure('Listing Caption', 'GOSTListingCaption', size=24, italic=True,
               line=240, first=0, align='left', before=120, keep=True)
     configure('Source Code', size=20, font_name='Courier New', line=240, first=0, align='left')
     for name, style in styles.items():
         if name.startswith('verbatim'):
             font(properties(style, 'rPr'), 20, name='Courier New')
+    for name in ['hyperlink', 'followedhyperlink']:
+        if name in styles:
+            rpr = properties(styles[name], 'rPr')
+            remove(rpr, 'color', 'u')
+            child(rpr, 'color', val='000000')
+            child(rpr, 'u', val='none')
     for level in range(1, 4):
-        style = configure(f'toc {level}', f'GOSTTOC{level}', size=24,
-                          line=240, first=0, align='left')
+        style = configure(f'toc {level}', f'GOSTTOC{level}', size=28,
+                          line=360, first=0, align='center' if level == 1 else 'both')
         ppr = properties(style, 'pPr')
-        child(ppr, 'ind', left=(level - 1) * 283, firstLine=0)
+        child(ppr, 'ind', left=0, right=360, firstLine=0)
         tabs = child(ppr, 'tabs')
         remove(tabs, 'tab')
         child(tabs, 'tab', val='right', leader='dot', pos=9638)
@@ -201,10 +319,18 @@ def section_widths(root: ET.Element) -> dict[ET.Element, int]:
 
 def fix_equations(root: ET.Element) -> None:
     widths = section_widths(root)
-    for p in root.iter(tag('p')):
+    parents = {el: parent for parent in root.iter() for el in parent}
+    for p in list(root.iter(tag('p'))):
         wrap = p.find('m:oMathPara', NS)
         if wrap is None:
             continue
+        siblings = list(parents[p])
+        following = siblings[siblings.index(p) + 1] if siblings.index(p) + 1 < len(siblings) else None
+        # A formula never ends a page apart from its «где» explanation.
+        keep = following is not None and following.find("w:pPr/w:pStyle[@w:val='Where']", NS) is not None
+        ppr = properties(p, 'pPr')
+        paragraph(ppr, first=0, align='center', before=EQUATION_SPACING,
+                  after=EQUATION_SPACING, keep=keep)
         math = wrap.find('m:oMath', NS)
         if math is None:
             continue
@@ -228,7 +354,7 @@ def fix_equations(root: ET.Element) -> None:
         p.insert(index, math)
         ppr = properties(p, 'pPr')
         paragraph(ppr, first=0, align='left', before=EQUATION_SPACING,
-                  after=EQUATION_SPACING, keep=True)
+                  after=EQUATION_SPACING, keep=keep)
         remove(ppr, 'tabs')
         tabs = child(ppr, 'tabs')
         width = widths.get(p, 9638)
@@ -287,10 +413,12 @@ def cell_lines(cell: ET.Element) -> list[str]:
 
 
 def fit_columns(table: ET.Element, width: int) -> None:
-    """Size columns by content when Markdown left them equal.
+    """Size columns by content when Markdown left them equal (rules 6.4).
 
     A column gets at least its longest word (bold in the header row) and at
-    most its longest line; the columns together take the full text width.
+    most its longest line. Like Word's «Автоподбор по содержимому», a table
+    whose lines all fit stays narrower than the text; a wider one takes the
+    full text width and wraps its longest cells.
     """
     grid = table.find('w:tblGrid', NS)
     cols = grid.findall('w:gridCol', NS) if grid is not None else []
@@ -308,7 +436,7 @@ def fit_columns(table: ET.Element, width: int) -> None:
             if span == 1 and index < n:
                 for line in cell_lines(cell):
                     # A 10% margin absorbs the error of the width estimate.
-                    word = max((text_width(w, r == 0) for w in line.split()), default=0.0)
+                    word = max((text_width(w, r == 0) for w in re.split(r'[\s/–—-]+', line)), default=0.0)
                     low[index] = max(low[index], word * 1.1)
                     high[index] = max(high[index], text_width(line.strip(), r == 0))
             index += span
@@ -316,7 +444,8 @@ def fit_columns(table: ET.Element, width: int) -> None:
     low = [x + pad for x in low]
     high = [max(h + pad, l) for h, l in zip(high, low)]
     if sum(high) <= width:
-        sizes = [h * width / sum(high) for h in high]
+        # A 5% reserve absorbs underestimated text widths.
+        sizes = [min(h * 1.05, h + (width - sum(high)) / n) for h in high]
     elif sum(low) >= width:
         sizes = [l * width / sum(low) for l in low]
     else:
@@ -324,7 +453,9 @@ def fit_columns(table: ET.Element, width: int) -> None:
         share = (width - sum(low)) / (sum(high) - sum(low))
         sizes = [l + (h - l) * share for l, h in zip(low, high)]
     sizes = [int(s) for s in sizes]
-    sizes[sizes.index(max(sizes))] += width - sum(sizes)
+    if sum(high) > width:
+        sizes[sizes.index(max(sizes))] += width - sum(sizes)
+    width = sum(sizes)
     for col, size in zip(cols, sizes):
         col.set(tag('w'), str(size))
     for row in rows:
@@ -353,11 +484,18 @@ def populate_toc(body: ET.Element, toc: ET.Element, styles: dict[str, str]) -> N
     heading_ids.update({styles['structural heading']: 1, styles['appendix heading']: 1})
     entries = []
     max_id = max((int(b.get(tag('id'), '0')) for b in body.iter(tag('bookmarkStart'))), default=0)
+    in_appendix = False
     for el in body:
         if el.tag != tag('p'):
             continue
         sid = el.find('w:pPr/w:pStyle', NS)
-        level = heading_ids.get(sid.get(tag('val'))) if sid is not None else None
+        style_id = sid.get(tag('val')) if sid is not None else None
+        level = heading_ids.get(style_id)
+        if style_id in (styles['structural heading'], styles['appendix heading']):
+            in_appendix = style_id == styles['appendix heading']
+        # Inside appendices only «Приложение А» itself is listed.
+        elif in_appendix:
+            level = None
         if level is not None:
             text = ''.join(t.text or '' for t in el.iter(tag('t')))
             max_id += 1
@@ -396,8 +534,137 @@ def populate_toc(body: ET.Element, toc: ET.Element, styles: dict[str, str]) -> N
     child(child(end, 'r'), 'fldChar', fldCharType='end')
 
 
+def add_table_gap(table: ET.Element, parents: dict, styles: dict) -> None:
+    # Word has no table-level paragraph spacing. Put the gap on the next
+    # paragraph, retaining a heading's larger spacing. Adjacent tables and
+    # a table at the end need their own six-point spacer instead.
+    parent = parents[table]
+    index = list(parent).index(table) + 1
+    following = next((el for el in list(parent)[index:]
+                      if el.tag not in (tag('bookmarkStart'), tag('bookmarkEnd'))), None)
+    if following is not None and following.tag == tag('p'):
+        ppr = properties(following, 'pPr')
+        sid = ppr.find('w:pStyle', NS)
+        style_id = sid.get(tag('val')) if sid is not None else ''
+        inherited = 480 if style_id in {styles[f'heading {n}'] for n in range(2, 7)} else 0
+        spacing = child(ppr, 'spacing')
+        before = int(spacing.get(tag('before'), inherited))
+        child(ppr, 'spacing', before=max(before, 120))
+    else:
+        spacer = ET.Element(tag('p'))
+        ppr = properties(spacer, 'pPr')
+        paragraph(ppr, first=0, line=120)
+        child(ppr, 'spacing', lineRule='exact')
+        parent.insert(index, spacer)
+
+
+def split_table(table: ET.Element, breaks: list[int], caption: str,
+                caption_style: str) -> list[ET.Element]:
+    """Explicit page cuts after body rows; never estimate pagination from text length."""
+    rows = table.findall('w:tr', NS)
+    header_count = 0
+    for row in rows:
+        if row.find('w:trPr/w:tblHeader', NS) is None:
+            break
+        header_count += 1
+    total = len(rows) - header_count
+    if not breaks or breaks != sorted(set(breaks)) or any(n < 1 or n >= total for n in breaks):
+        raise ValueError('break-after: номера должны возрастать и быть меньше числа строк данных')
+    number = re.match(r'(Таблица|Листинг)\s+(\S+)', caption)
+    if number is None:
+        raise ValueError('break-after: таблице нужна нумерованная подпись')
+    # Rules 6.3: «Продолжение Таблицы 6.1» in the caption style; listings alike.
+    word = {'Таблица': 'Таблицы', 'Листинг': 'Листинга'}[number.group(1)]
+    continuation = f'Продолжение {word} {number.group(2)}'
+    blocks = []
+    start = 0
+    for part, end in enumerate(breaks + [total]):
+        fragment = deepcopy(table)
+        for row in fragment.findall('w:tr', NS):
+            fragment.remove(row)
+        selected = rows[:header_count] + rows[header_count + start:header_count + end]
+        for row in selected:
+            copy = deepcopy(row)
+            if part and row in rows[:header_count]:
+                for parent in copy.iter():
+                    remove(parent, 'bookmarkStart', 'bookmarkEnd')
+            fragment.append(copy)
+        if part:
+            p = ET.Element(tag('p'))
+            ppr = properties(p, 'pPr')
+            child(ppr, 'pStyle', val=caption_style)
+            child(ppr, 'pageBreakBefore', val='1')
+            child(ppr, 'keepNext', val='1')
+            child(child(p, 'r'), 't').text = continuation
+            blocks.append(p)
+        if end < total:
+            # A cell border wins over tblBorders, which is normalized later.
+            for cell in fragment.findall('w:tr', NS)[-1].findall('w:tc', NS):
+                child(child(properties(cell, 'tcPr'), 'tcBorders'), 'bottom', val='nil')
+        blocks.append(fragment)
+        start = end
+    return blocks
+
+
+def apply_table_breaks(body: ET.Element, styles: dict[str, str]) -> None:
+    for parent in list(body.iter()):
+        pending = None
+        caption, caption_style = '', styles['table caption']
+        for block in list(parent):
+            sid = block.find('w:pPr/w:pStyle', NS)
+            value = sid.get(tag('val')) if sid is not None else ''
+            if value == 'GOSTTableBreaks':
+                pending = [int(x) for x in re.findall(r'\d+', ''.join(block.itertext()))]
+                parent.remove(block)
+            elif value in (styles['table caption'], styles['listing caption']):
+                caption, caption_style = ''.join(block.itertext()), value
+            elif block.tag == tag('tbl') and pending is not None:
+                parts = split_table(block, pending, caption, caption_style)
+                index = list(parent).index(block)
+                parent.remove(block)
+                for offset, part in enumerate(parts):
+                    parent.insert(index + offset, part)
+                pending = None
+
+
+def fit_figures(root: ET.Element) -> None:
+    """Keep drawings inside text width and leave room for introduction/caption.
+
+    19 cm is a layout choice for portrait pages, not a rule in the source.
+    Never upscale an image. DrawingML extents use EMU (635 per twip).
+    """
+    widths = section_widths(root)
+    wp = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+    drawing = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+    blocks = root.findall('w:body/w:p', NS)
+    for p in root.iter(tag('p')):
+        width = widths.get(p, 9638) * 635
+        # Landscape: its shorter vertical area needs a lower cap.
+        height_cm = 14 if widths.get(p, 9638) > 9638 else 19
+        if p in blocks:
+            index = blocks.index(p)
+            preceding = blocks[max(0, index - 2):index]
+            if any(re.match(r'^\d+(?:\.\d+)+\s', ''.join(t.text or '' for t in el.iter(tag('t'))))
+                   for el in preceding):
+                height_cm = min(height_cm, 17.5)
+        height = height_cm * 360000
+        for inline in p.findall('.//{' + wp + '}inline'):
+            extent = inline.find('{' + wp + '}extent')
+            if extent is None:
+                continue
+            cx, cy = int(extent.get('cx', '0')), int(extent.get('cy', '0'))
+            if cx <= 0 or cy <= 0:
+                continue
+            factor = min(1, width / cx, height / cy)
+            if factor < 1:
+                for size in [extent] + inline.findall('.//{' + drawing + '}xfrm/{' + drawing + '}ext'):
+                    size.set('cx', str(round(cx * factor)))
+                    size.set('cy', str(round(cy * factor)))
+
+
 def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -> None:
     body = root.find('w:body', NS)
+    apply_table_breaks(body, styles)
     section = body.find('w:sectPr', NS)
     # Empty metadata emitted by Pandoc must not turn into a blank title page.
     for el in list(body):
@@ -455,9 +722,12 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
             depth = int(level.get(tag('val'), '0')) if level is not None else 0
             remove(ppr, 'ind')
             if in_bibliography:
-                child(ppr, 'ind', left=0, firstLine=567)
+                child(ppr, 'ind', left=0, firstLine=709)
             else:
                 child(ppr, 'ind', left=1276 + depth * 567, hanging=567)
+                tabs = child(ppr, 'tabs')
+                remove(tabs, 'tab')
+                child(tabs, 'tab', val='num', pos=1276 + depth * 567)
             child(ppr, 'spacing', before=0, after=0, line=360, lineRule='auto')
         if style_id in ('GOSTLandscapeStart', 'GOSTLandscapeEnd'):
             section_copy = deepcopy(section)
@@ -470,6 +740,7 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
         populate_toc(body, toc, styles)
     page_setup(section, start=page_start)
     fix_equations(root)
+    fit_figures(root)
     # Start numbering on the first section, continue across landscape inserts.
     all_sections = list(body.iter(tag('sectPr')))
     for i, sect in enumerate(all_sections):
@@ -482,14 +753,17 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
         if any(p.find('w:pPr/w:pStyle', NS) is not None and
                p.find('w:pPr/w:pStyle', NS).get(tag('val')) == 'SourceCode'
                for p in table.iter(tag('p'))):
+            add_table_gap(table, parents, styles)
             continue
         # Raw listing tables carry explicit Courier New runs.
         if any(r.get(tag('ascii')) == 'Courier New' for r in table.iter(tag('rFonts'))):
+            add_table_gap(table, parents, styles)
             continue
         header = table.find('w:tr', NS)
         if header is not None:
             child(properties(header, 'trPr'), 'tblHeader')
         tpr = properties(table, 'tblPr')
+        child(tpr, 'jc', val='center')
         borders = child(tpr, 'tblBorders')
         for edge in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
             child(borders, edge, val='single', sz=4, color='000000')
@@ -497,13 +771,20 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
             ppr = properties(p, 'pPr')
             child(ppr, 'spacing', before=0, after=0, line=240, lineRule='auto')
             child(ppr, 'ind', firstLine=0, left=0, right=0)
-            # Justified text in narrow content-fitted columns stretches spaces.
-            child(ppr, 'jc', val='left')
+            # Row labels are left aligned; remaining data cells follow Table 6.1.
+            child(ppr, 'jc', val='both')
+            child(ppr, 'suppressAutoHyphens', val='1')
             child(ppr, 'keepNext', val='0')
             child(ppr, 'pageBreakBefore', val='0')
             for run in p.iter(tag('r')):
                 rpr = properties(run, 'rPr')
                 child(rpr, 'sz', val=24); child(rpr, 'szCs', val=24)
+        for row in table.findall('w:tr', NS):
+            child(properties(row, 'trPr'), 'cantSplit')
+            first_cell = row.find('w:tc', NS)
+            if first_cell is not None:
+                for p in first_cell.iter(tag('p')):
+                    child(properties(p, 'pPr'), 'jc', val='left')
         if header is not None:
             for p in header.iter(tag('p')):
                 child(properties(p, 'pPr'), 'jc', val='center')
@@ -519,27 +800,7 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
         names = [el.tag.split('}')[1] for el in tpr]
         rank = {n: TBLPR_ORDER.index(n) if n in TBLPR_ORDER else len(TBLPR_ORDER) for n in names}
         tpr[:] = sorted(tpr, key=lambda el: rank[el.tag.split('}')[1]])
-        # Word has no table-level paragraph spacing. Put the gap on the next
-        # paragraph, retaining a heading's larger spacing. Adjacent tables and
-        # a table at the end need their own six-point spacer instead.
-        parent = parents[table]
-        index = list(parent).index(table) + 1
-        following = next((el for el in list(parent)[index:]
-                          if el.tag not in (tag('bookmarkStart'), tag('bookmarkEnd'))), None)
-        if following is not None and following.tag == tag('p'):
-            ppr = properties(following, 'pPr')
-            sid = ppr.find('w:pStyle', NS)
-            style_id = sid.get(tag('val')) if sid is not None else ''
-            inherited = 480 if style_id in {styles[f'heading {n}'] for n in range(2, 7)} else 0
-            spacing = child(ppr, 'spacing')
-            before = int(spacing.get(tag('before'), inherited))
-            child(ppr, 'spacing', before=max(before, 120))
-        else:
-            spacer = ET.Element(tag('p'))
-            ppr = properties(spacer, 'pPr')
-            paragraph(ppr, first=0, line=120)
-            child(ppr, 'spacing', lineRule='exact')
-            parent.insert(index, spacer)
+        add_table_gap(table, parents, styles)
     # Keep introductory text, images, captions and table captions together.
     blocks = [x for x in body if x.tag in (tag('p'), tag('tbl'))]
     for i, el in enumerate(blocks[:-1]):
@@ -547,12 +808,11 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
         sid = nxt.find('w:pPr/w:pStyle', NS)
         nxt_style = sid.get(tag('val')) if sid is not None else ''
         image = nxt.find('.//w:drawing', NS) is not None
-        if el.tag == tag('p') and (image or nxt_style in
-                (styles['table caption'], styles['image caption'], 'GOSTListingCaption')):
+        if el.tag == tag('p') and (image or nxt_style == styles['image caption']):
             child(properties(el, 'pPr'), 'keepNext', val='1')
 
 
-def apply_sample_layout(path: Path, *, page_start: int = 1, template_only: bool = False) -> None:
+def apply_rules_layout(path: Path, *, page_start: int = 1, template_only: bool = False) -> None:
     updates = {}
     with zipfile.ZipFile(path) as package:
         original = package.read('word/styles.xml')
@@ -580,6 +840,12 @@ def apply_sample_layout(path: Path, *, page_start: int = 1, template_only: bool 
             original = package.read('word/numbering.xml')
             numbering = parse(original)
             for level in numbering.findall('.//w:lvl', NS):
+                depth = int(level.get(tag('ilvl'), '0'))
+                ppr = properties(level, 'pPr')
+                remove(ppr, 'ind', 'tabs')
+                child(ppr, 'ind', left=1276 + depth * 567, hanging=567)
+                child(child(ppr, 'tabs'), 'tab', val='num', pos=1276 + depth * 567)
+                child(level, 'suff', val='tab')
                 kind = level.find('w:numFmt', NS)
                 if kind is not None and kind.get(tag('val')) == 'bullet':
                     child(level, 'lvlText', val='–')
@@ -589,6 +855,7 @@ def apply_sample_layout(path: Path, *, page_start: int = 1, template_only: bool 
             original = package.read('word/settings.xml')
             settings = parse(original)
             child(settings, 'updateFields', val='true')
+            child(settings, 'autoHyphenation', val='false')
             remove(settings, 'evenAndOddHeaders')
             updates['word/settings.xml'] = serialize(settings, original)
     rewrite_package(path, updates)

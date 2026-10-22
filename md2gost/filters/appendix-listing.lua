@@ -1,131 +1,64 @@
-local MAX_LINES_PER_TABLE = 42
-
-local page_break = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+-- A code block whose first line starts with «Листинг» becomes a caption and a
+-- framed one-column table, one row per code line (rules 8.2, 8.4, 8.5). Rows let
+-- measured pagination or break-after cut the listing at a page boundary and
+-- continue it under «Продолжение Листинга N».
 
 local function escape_xml(s)
-  s = s:gsub("&", "&amp;")
-  s = s:gsub("<", "&lt;")
-  s = s:gsub(">", "&gt;")
-  s = s:gsub('"', "&quot;")
-  return s
+  return (s:gsub('&', '&amp;'):gsub('<', '&lt;'):gsub('>', '&gt;'):gsub('"', '&quot;'))
 end
 
-local function make_caption(text)
-  return string.format(
-    '<w:p>'
-    .. '<w:pPr><w:pStyle w:val="GOSTListingCaption"/><w:keepNext/><w:spacing w:before="120" w:after="0"/></w:pPr>'
-    .. '<w:r><w:rPr></w:rPr>'
-    .. '<w:t xml:space="preserve">%s</w:t></w:r>'
-    .. '</w:p>',
-    escape_xml(text)
-  )
+local function caption(text)
+  return '<w:p><w:pPr><w:pStyle w:val="GOSTListingCaption"/></w:pPr>'
+    .. '<w:r><w:t xml:space="preserve">' .. escape_xml(text) .. '</w:t></w:r></w:p>'
 end
 
-local function make_code_paragraph(line)
-  return string.format(
-    '<w:p>'
-    .. '<w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/>'
-    .. '<w:ind w:firstLine="0"/><w:jc w:val="left"/><w:wordWrap w:val="1"/></w:pPr>'
-    .. '<w:r><w:rPr>'
-    .. '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:cs="Courier New"/>'
-    .. '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-    .. '</w:rPr>'
-    .. '<w:t xml:space="preserve">%s</w:t></w:r>'
-    .. '</w:p>',
-    escape_xml(line)
-  )
+local function row(line)
+  return '<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="5000" w:type="pct"/></w:tcPr>'
+    .. '<w:p><w:pPr><w:pStyle w:val="SourceCode"/><w:wordWrap w:val="1"/></w:pPr>'
+    .. '<w:r><w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:cs="Courier New"/>'
+    .. '<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
+    .. '<w:t xml:space="preserve">' .. escape_xml(line) .. '</w:t></w:r></w:p></w:tc></w:tr>'
 end
 
-local function make_table(code_paragraphs)
-  return string.format(
-    '<w:tbl>'
-    .. '<w:tblPr>'
-    ..   '<w:tblW w:w="5000" w:type="pct"/>'
-    ..   '<w:tblBorders>'
-    ..     '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    ..     '<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    ..     '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    ..     '<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
-    ..   '</w:tblBorders>'
-    ..   '<w:tblCellMar>'
-    ..     '<w:top w:w="40" w:type="dxa"/>'
-    ..     '<w:left w:w="80" w:type="dxa"/>'
-    ..     '<w:bottom w:w="40" w:type="dxa"/>'
-    ..     '<w:right w:w="80" w:type="dxa"/>'
-    ..   '</w:tblCellMar>'
-    .. '</w:tblPr>'
-    .. '<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc>'
-    ..   '<w:tcPr><w:tcW w:w="5000" w:type="pct"/></w:tcPr>'
-    ..   '%s'
-    .. '</w:tc></w:tr>'
-    .. '</w:tbl>',
-    table.concat(code_paragraphs, "")
-  )
-end
-
-local listing_count_in_appendix = 0
-
-function Header(el)
-  if el.level == 1 then
-    listing_count_in_appendix = 0
-  end
+local function frame(rows)
+  local border = 'w:val="single" w:sz="4" w:space="0" w:color="000000"'
+  return '<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:jc w:val="center"/>'
+    .. '<w:tblBorders><w:top ' .. border .. '/><w:left ' .. border .. '/><w:bottom ' .. border .. '/>'
+    .. '<w:right ' .. border .. '/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+    .. '<w:tblLayout w:type="fixed"/>'
+    .. '<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="80" w:type="dxa"/>'
+    .. '<w:bottom w:w="0" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
+    .. '</w:tblPr><w:tblGrid><w:gridCol w:w="9638"/></w:tblGrid>' .. table.concat(rows) .. '</w:tbl>'
 end
 
 function CodeBlock(el)
-  local first_line, rest = el.text:match("^(Листинг[^\n]*)\n(.*)")
+  local first_line, rest = el.text:match('^(Листинг[^\n]*)\n(.*)')
   if not first_line then return el end
-
-  listing_count_in_appendix = listing_count_in_appendix + 1
-
-  rest = rest:gsub("%s+$", "")
-
-  local continuation_caption = 'Продолжение ' .. first_line:gsub('^Листинг', 'листинга')
+  -- «Листинг 1.7 — Процедура» (8.2): the dash between number and name.
+  for _, dash in ipairs({'–', '-'}) do
+    first_line = first_line:gsub('^(Листинг%s+%S+)%s+' .. dash .. '%s+', '%1 — ')
+  end
+  rest = rest:gsub('%s+$', '')
 
   local lines = {}
-  for line in (rest .. "\n"):gmatch("([^\n]*)\n") do
-    table.insert(lines, line)
+  for line in (rest .. '\n'):gmatch('([^\n]*)\n') do table.insert(lines, line) end
+  -- Lines referenced in the text are numbered with step 10 (8.3).
+  if el.classes:includes('numberLines') or el.classes:includes('number-lines') then
+    local width = #tostring(10 * #lines)
+    for i, line in ipairs(lines) do
+      lines[i] = string.format('%-' .. width .. 's  %s', tostring(10 * i), line)
+    end
   end
+  local rows = {}
+  for _, line in ipairs(lines) do table.insert(rows, row(line)) end
 
-  local chunks = {}
-  local chunk = {}
-  local visual_lines = 0
-  for _, line in ipairs(lines) do
-    -- Courier New 10pt: at most 76 characters across the portrait text area.
-    local length = utf8.len(line) or #line
-    local needed = math.max(1, math.ceil(length / 76))
-    if visual_lines + needed > MAX_LINES_PER_TABLE and #chunk > 0 then
-      table.insert(chunks, chunk)
-      chunk = {}
-      visual_lines = 0
-    end
-    table.insert(chunk, line)
-    visual_lines = visual_lines + needed
+  local blocks = {pandoc.RawBlock('openxml', caption(first_line))}
+  local breaks = el.attributes['break-after']
+  if breaks then
+    if not breaks:match('^%d+[, %d]*$') then error('break-after: ожидаются номера строк') end
+    table.insert(blocks, pandoc.RawBlock('openxml',
+      '<w:p><w:pPr><w:pStyle w:val="GOSTTableBreaks"/></w:pPr><w:r><w:t>' .. breaks .. '</w:t></w:r></w:p>'))
   end
-  if #chunk > 0 then table.insert(chunks, chunk) end
-
-  local blocks = {}
-  for idx, chunk in ipairs(chunks) do
-    local caption
-    if idx == 1 then
-      caption = first_line
-    elseif idx == #chunks then
-      caption = 'Окончание ' .. first_line:gsub('^Листинг', 'листинга')
-    else
-      caption = continuation_caption
-    end
-
-    if idx > 1 or listing_count_in_appendix > 1 then
-      table.insert(blocks, pandoc.RawBlock("openxml", page_break))
-    end
-
-    table.insert(blocks, pandoc.RawBlock("openxml", make_caption(caption)))
-
-    local code_paragraphs = {}
-    for _, line in ipairs(chunk) do
-      table.insert(code_paragraphs, make_code_paragraph(line))
-    end
-    table.insert(blocks, pandoc.RawBlock("openxml", make_table(code_paragraphs)))
-  end
-
+  table.insert(blocks, pandoc.RawBlock('openxml', frame(rows)))
   return blocks
 end

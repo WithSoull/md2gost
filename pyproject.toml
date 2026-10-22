@@ -16,6 +16,7 @@ dependencies = [
 md2gost = "md2gost.cli:cli"
 
 [project.optional-dependencies]
+pagination = ["pypdf>=5"]
 dev = [
     "pytest>=8.0",
 ]

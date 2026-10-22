@@ -37,9 +37,10 @@ def test_build_command_default():
     assert "-o" in cmd
 
     lua_idxs = [i for i, x in enumerate(cmd) if x == "--lua-filter"]
-    assert len(lua_idxs) == 3
+    assert len(lua_idxs) == 4
     lua_paths = [cmd[i + 1] for i in lua_idxs]
     assert any("uppercase-h1" in p for p in lua_paths)
+    assert any("gost-text" in p for p in lua_paths)
     assert any("gost-tables" in p for p in lua_paths)
     assert any("appendix-listing" in p for p in lua_paths)
 
