@@ -145,16 +145,45 @@ def parse(data: bytes) -> ET.Element:
     return ET.fromstring(data)
 
 
+# Word extensions a part may list in mc:Ignorable.
+EXTENSIONS = {
+    'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
+    'wp14': 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing',
+    'w15': 'http://schemas.microsoft.com/office/word/2012/wordml',
+    'w16se': 'http://schemas.microsoft.com/office/word/2015/wordml/symex',
+    'w16cid': 'http://schemas.microsoft.com/office/word/2016/wordml/cid',
+    'w16': 'http://schemas.microsoft.com/office/word/2018/wordml',
+    'w16cex': 'http://schemas.microsoft.com/office/word/2018/wordml/cex',
+    'w16sdtdh': 'http://schemas.microsoft.com/office/word/2020/wordml/sdtdatahash',
+    'w16du': 'http://schemas.microsoft.com/office/word/2023/wordml/word16du',
+    'w16sdtfl': 'http://schemas.microsoft.com/office/word/2024/wordml/sdtformatlock',
+}
+
+
 def serialize(root: ET.Element, original: bytes) -> bytes:
     normalize_order(root)
     result = ET.tostring(root, encoding='unicode')
-    # Keep declarations referenced by mc:Ignorable even if no element uses them.
+    end = result.index('>')
+    head, rest = result[:end], result[end:]
+    # ElementTree drops declarations no element uses; mc:Ignorable still names them.
     opening = original.decode('utf-8').split('>', 2)
     source = opening[1] if opening[0].startswith('<?xml') else opening[0]
-    for prefix, uri in re.findall(r'xmlns:([\w]+)="([^"]+)"', source):
-        if f'xmlns:{prefix}=' not in result:
-            result = result.replace('>', f' xmlns:{prefix}="{uri}">', 1)
-    return result.encode('utf-8')
+    declared = dict(re.findall(r'xmlns:(\w+)="([^"]+)"', source))
+    for prefix, uri in declared.items():
+        if f'xmlns:{prefix}=' not in head:
+            head += f' xmlns:{prefix}="{uri}"'
+    # Word rejects a part whose mc:Ignorable names an undeclared prefix
+    # («unreadable content»): declare known extensions, drop the rest.
+    ignorable = re.search(r'(\w+):Ignorable="([^"]*)"', head)
+    if ignorable:
+        kept = []
+        for prefix in ignorable.group(2).split():
+            if f'xmlns:{prefix}=' not in head and prefix in EXTENSIONS:
+                head += f' xmlns:{prefix}="{EXTENSIONS[prefix]}"'
+            if f'xmlns:{prefix}=' in head:
+                kept.append(prefix)
+        head = head.replace(ignorable.group(0), f'{ignorable.group(1)}:Ignorable="{" ".join(kept)}"')
+    return (head + rest).encode('utf-8')
 
 
 def rewrite_package(path: Path, updates: dict[str, bytes]) -> None:
@@ -801,14 +830,16 @@ def format_document(root: ET.Element, styles: dict[str, str], page_start: int) -
         rank = {n: TBLPR_ORDER.index(n) if n in TBLPR_ORDER else len(TBLPR_ORDER) for n in names}
         tpr[:] = sorted(tpr, key=lambda el: rank[el.tag.split('}')[1]])
         add_table_gap(table, parents, styles)
-    # Keep introductory text, images, captions and table captions together.
+    # A figure stays with its caption. The paragraph that mentions it is not
+    # kept with the figure: rules 1.14 allow the figure on the next page, and a
+    # heading, a long introduction and a tall figure chained together exceed a
+    # page, so Word moves the chain and leaves empty space on two pages.
     blocks = [x for x in body if x.tag in (tag('p'), tag('tbl'))]
     for i, el in enumerate(blocks[:-1]):
         nxt = blocks[i + 1]
         sid = nxt.find('w:pPr/w:pStyle', NS)
         nxt_style = sid.get(tag('val')) if sid is not None else ''
-        image = nxt.find('.//w:drawing', NS) is not None
-        if el.tag == tag('p') and (image or nxt_style == styles['image caption']):
+        if el.find('.//w:drawing', NS) is not None and nxt_style == styles['image caption']:
             child(properties(el, 'pPr'), 'keepNext', val='1')
 
 

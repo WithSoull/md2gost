@@ -1,5 +1,6 @@
 """Check actual Pandoc output, including numbering and OOXML layout contracts."""
 from pathlib import Path
+import re
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -565,3 +566,58 @@ def test_bibliography_rubrics(tmp_path):
     assert style.find('w:rPr/w:caps', NS).get(tag('val')) == '1'
     assert style.find('w:pPr/w:ind', NS).get(tag('left')) == '709'
     assert style.find('w:pPr/w:jc', NS).get(tag('val')) == 'center'
+
+
+def test_long_addresses_may_wrap(tmp_path):
+    """A printed URL breaks after «/» and «.»; the hyperlink target is unchanged."""
+    url = 'https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition.html'
+    output = build(tmp_path, f'## Раздел\n\nURL: <{url}> и [коротко](https://a.b/c).\n')
+    with zipfile.ZipFile(output) as package:
+        rels = package.read('word/_rels/document.xml.rels').decode()
+    shown = text(read_part(output, 'word/document.xml'))
+    assert 'https://​docs.​aws.​' in shown
+    assert shown.replace('​', '').count(url) == 1
+    assert url in rels and '​' not in rels
+    assert 'коротко' in shown
+
+
+def test_ignorable_prefixes_are_declared(converted):
+    """Word reports «unreadable content» when mc:Ignorable names an undeclared prefix."""
+    for path in [converted, BUILTIN_TEMPLATE]:
+        with zipfile.ZipFile(path) as package:
+            for name in package.namelist():
+                if not name.endswith('.xml'):
+                    continue
+                data = package.read(name).decode('utf-8')
+                head = re.search(r'<(?![?!])[^>]*>', data).group(0)
+                ignorable = re.search(r':Ignorable="([^"]*)"', head)
+                for prefix in ignorable.group(1).split() if ignorable else []:
+                    assert f'xmlns:{prefix}=' in head, (path.name, name, prefix)
+
+
+def test_serialize_repairs_ignorable_declarations():
+    from md2gost.formatting import EXTENSIONS
+    original = ('<w:styles xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+                'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+                'mc:Ignorable="w14 w15 x99"><w:style/></w:styles>').encode()
+    head = serialize(parse(original), original).decode().split('>', 1)[0]
+    assert f'xmlns:w14="{EXTENSIONS["w14"]}"' in head and f'xmlns:w15="{EXTENSIONS["w15"]}"' in head
+    # An unknown prefix cannot be declared, so Word must not be told to ignore it.
+    assert 'Ignorable="w14 w15"' in head
+
+
+def test_figure_keeps_caption_but_not_its_introduction(tmp_path):
+    """A heading, a long introduction and a tall figure chained together exceed a
+    page: Word then leaves empty space on two pages. Only figure and caption are
+    kept together; rules 1.14 allow the figure on the next page."""
+    svg = Path(__file__).parent / 'fixtures' / 'formatting' / 'diagram.svg'
+    output = build(tmp_path, f'## Раздел\n\n### Подраздел\n\nСхема показана на Рисунке @fig:a.\n\n'
+                   f'![Схема]({svg}){{#fig:a}}\n\nТекст после рисунка.\n')
+    paras = read_part(output, 'word/document.xml').findall('.//w:body/w:p', NS)
+    keep = {i: p.find('w:pPr/w:keepNext', NS) for i, p in enumerate(paras)}
+    figure = next(i for i, p in enumerate(paras) if p.find('.//w:drawing', NS) is not None)
+    intro = paras[figure - 1]
+    assert text(intro) == 'Схема показана на Рисунке 1.1.'
+    assert keep[figure - 1] is None or keep[figure - 1].get(tag('val')) == '0'
+    assert keep[figure].get(tag('val')) == '1'
+    assert text(paras[figure + 1]) == 'Рисунок 1.1 – Схема'
