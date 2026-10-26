@@ -14,13 +14,15 @@ local function styled(style, inlines)
 end
 
 local function trim(s)
-  return (s:gsub('^%s+', ''):gsub('%s+$', ''))
+  -- Lua character classes are locale-dependent and operate on bytes: %s can
+  -- treat the final 0xA0 byte of Cyrillic «Р» as whitespace. Trim ASCII only.
+  return (s:gsub('^[ \t\r\n\v\f]+', ''):gsub('[ \t\r\n\v\f]+$', ''))
 end
 
 -- «Приложение А», «Приложение А. Название», «Приложение А — Название».
 local function appendix_heading(text)
   if pandoc.text.upper(text:sub(1, #APPENDIX)) ~= pandoc.text.upper(APPENDIX) then return end
-  local letter, rest = text:sub(#APPENDIX + 1):match('^%s+(%S+)(.*)$')
+  local letter, rest = text:sub(#APPENDIX + 1):match('^[ \t\r\n]+([^ \t\r\n]+)(.*)$')
   if not letter then return end
   letter = letter:gsub('%.$', '')
   rest = trim(rest)
@@ -106,7 +108,7 @@ function Pandoc(doc)
     local items = pandoc.Blocks({})
     for _, a in ipairs(appendices) do
       local line = APPENDIX .. ' ' .. a.letter
-      if a.title ~= '' then line = line .. ' — ' .. a.title end
+      if a.title ~= '' then line = line .. ' – ' .. a.title end
       items:insert(pandoc.Para(pandoc.Inlines(line)))
     end
     local result = pandoc.Blocks({})

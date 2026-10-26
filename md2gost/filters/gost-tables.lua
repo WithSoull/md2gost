@@ -92,7 +92,7 @@ function Pandoc(doc)
     Figure = function(el)
       if #el.caption.long == 0 then return el end
       local number = next_number('fig', el.identifier)
-      caption_with_prefix(el.caption, 'Рисунок ' .. number .. ' —')
+      caption_with_prefix(el.caption, 'Рисунок ' .. number .. ' –')
       -- Keep bookmarks but stop pandoc-crossref from adding its own number.
       if el.identifier:match('^fig:') then el.identifier = 'gost-' .. el.identifier end
       return el
@@ -100,7 +100,7 @@ function Pandoc(doc)
     Table = function(el)
       if #el.caption.long == 0 then return el end
       local number = next_number('tbl', el.identifier)
-      caption_with_prefix(el.caption, 'Таблица ' .. number .. ' —')
+      caption_with_prefix(el.caption, 'Таблица ' .. number .. ' –')
       if el.identifier:match('^tbl:') then el.identifier = 'gost-' .. el.identifier end
       local breaks = el.attributes['break-after']
       if breaks then

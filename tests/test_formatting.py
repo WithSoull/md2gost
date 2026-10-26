@@ -69,10 +69,10 @@ def test_headings_and_no_empty_title_block(converted):
 def test_caption_numbers_and_forward_references(converted):
     root = read_part(converted, 'word/document.xml')
     values = [text(p) for p in root.findall('.//w:p', NS)]
-    for expected in ['Таблица 1.1 — Сравнение решений', 'Таблица 1.2 — Дополнительные показатели',
-                     'Таблица 2.1 — Характеристики метода', 'Таблица А.1 — Данные приложения',
-                     'Таблица Б.1 — Длинная таблица', 'Рисунок 1.1 — Порядок обработки',
-                     'Рисунок 2.1 — Схема обработки', 'Рисунок А.1 — Схема приложения']:
+    for expected in ['Таблица 1.1 – Сравнение решений', 'Таблица 1.2 – Дополнительные показатели',
+                     'Таблица 2.1 – Характеристики метода', 'Таблица А.1 – Данные приложения',
+                     'Таблица Б.1 – Длинная таблица', 'Рисунок 1.1 – Порядок обработки',
+                     'Рисунок 2.1 – Схема обработки', 'Рисунок А.1 – Схема приложения']:
         assert expected in values
     # References render as a bare number; the noun comes from the author.
     assert any('будущий Рисунок 2.1.' in value for value in values)
@@ -230,7 +230,7 @@ def test_appendix_subsections_and_grouped_refs(tmp_path):
     values = [value for value, _ in styled]
     # Rules 10.3: the first sheet of «Приложения» lists the appendices.
     start = values.index('ПРИЛОЖЕНИЯ')
-    assert values[start + 1:start + 3] == ['Приложение А — Исходные данные', 'Приложение Б — Расчёты']
+    assert values[start + 1:start + 3] == ['Приложение А – Исходные данные', 'Приложение Б – Расчёты']
     assert ('Приложение А', 'GOSTAppendixHeading') in styled
     assert ('Исходные данные', 'GOSTAppendixTitle') in styled
     assert ('Приложение А.1', 'GOSTAppendixSection') in styled
