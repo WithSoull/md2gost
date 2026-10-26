@@ -9,11 +9,12 @@ CLI-утилита для конвертации Markdown в DOCX по ГОСТ 
 ## Commands
 
 ```bash
-# Установка (Homebrew)
-brew tap WithSoull/md2gost https://github.com/WithSoull/md2gost && brew install md2gost
+# Установка CLI (macOS, Linux, Windows; внешние зависимости — в README)
+uv tool install --python 3.13 "git+https://github.com/WithSoull/md2gost.git@main"
+uv tool update-shell
 
 # Установка (dev)
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+uv sync --extra dev --extra pagination
 
 # Конвертация
 md2gost convert report.md                    # → report.docx
@@ -28,7 +29,7 @@ md2gost convert report.md --paginate --keep-order  # без переноса а�
 md2gost watch report.md
 
 # Тесты
-.venv/bin/pytest tests/ -v
+uv run pytest tests/ -v
 ```
 
 Внешние зависимости (должны быть в PATH): `pandoc`, `pandoc-crossref`; для `--paginate` — LibreOffice 7.4+ (`soffice`) и `pypdf`.

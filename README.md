@@ -4,58 +4,27 @@
 
 ## Установка
 
-### macOS (Homebrew) — рекомендуется
+Установи [uv](https://docs.astral.sh/uv/getting-started/installation/), [Git](https://git-scm.com/downloads), [Pandoc 3.8+](https://pandoc.org/installing.html) и [pandoc-crossref](https://github.com/lierdakil/pandoc-crossref/releases). Все четыре команды должны быть доступны в `PATH`. Версия Pandoc должна совпадать с той, что указана после `built with Pandoc` в выводе `pandoc-crossref --version` ([требование pandoc-crossref](https://github.com/lierdakil/pandoc-crossref#installation)).
+
+Дальше одинаково на macOS, Linux и Windows:
 
 ```bash
-brew tap WithSoull/md2gost https://github.com/WithSoull/md2gost
-brew install md2gost
+uv tool install --python 3.13 "git+https://github.com/WithSoull/md2gost.git@main"
+uv tool update-shell
 ```
 
-Всё. Pandoc, pandoc-crossref и Python-зависимости подтянутся автоматически.
-
-### Ручная установка
-
-1. Поставь pandoc и pandoc-crossref:
+uv установит Python 3.13 и зависимости. Открой новый терминал и проверь:
 
 ```bash
-# macOS
-brew install pandoc pandoc-crossref
-
-# Ubuntu/Debian
-sudo apt install pandoc
-# pandoc-crossref: скачай бинарник с https://github.com/lierdakil/pandoc-crossref/releases
-
-# Windows
-choco install pandoc
-# pandoc-crossref: скачай .exe с https://github.com/lierdakil/pandoc-crossref/releases и положи в PATH
+pandoc --version
+pandoc-crossref --version
+md2gost --help
 ```
 
-2. Установи md2gost:
+Обновление до текущей версии из `main`:
 
 ```bash
-git clone https://github.com/WithSoull/md2gost.git
-cd md2gost
-```
-
-**С uv (быстрее всего):**
-
-```bash
-uv venv && uv pip install -e .
-source .venv/bin/activate
-```
-
-**С pip:**
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
-source .venv/bin/activate
-```
-
-**С pipx (глобально, без venv):**
-
-```bash
-pipx install .
+uv tool upgrade md2gost
 ```
 
 ## Использование
@@ -93,7 +62,7 @@ md2gost watch report.md
 Дополнительно установи LibreOffice (7.4 или новее) и зависимость для чтения результатов вёрстки:
 
 ```bash
-.venv/bin/pip install -e '.[pagination]'
+uv tool install --reinstall --python 3.13 "md2gost[pagination] @ git+https://github.com/WithSoull/md2gost.git@main"
 md2gost convert diploma.md --no-title-page --paginate
 ```
 
@@ -270,11 +239,11 @@ class Model(torch.nn.Module):
 
 Утилита оформляет предоставленный материал: аннотацию, источники, пояснения формул, расчёты, сканы и подписи она не сочиняет. Ссылки остаются кликабельными, но печатаются чёрным без подчёркивания.
 
-### Проверка изменений
+### Проверка изменений в исходниках
 
 ```bash
-.venv/bin/pytest tests/ -q
-md2gost convert tests/fixtures/formatting/diploma.md --no-title-page --paginate -o /tmp/check.docx
+uv run --extra dev --extra pagination pytest tests/ -q
+uv run md2gost convert tests/fixtures/formatting/diploma.md --no-title-page -o build/check.docx
 ```
 
 Проверочный документ охватывает подписи, прямые и опережающие ссылки, формулы основной части и приложения с пояснениями «где», таблицу обозначений с формулами в ячейках, длинный листинг, многостраничную альбомную таблицу и возврат к книжной ориентации. Тест с LibreOffice пропускается, если `soffice` не установлен.
